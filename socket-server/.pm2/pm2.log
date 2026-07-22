@@ -1,0 +1,72 @@
+2026-03-06T03:47:46: PM2 log: ===============================================================================
+2026-03-06T03:47:46: PM2 log: --- New PM2 Daemon started ----------------------------------------------------
+2026-03-06T03:47:46: PM2 log: Time                 : Fri Mar 06 2026 03:47:46 GMT+0000 (Coordinated Universal Time)
+2026-03-06T03:47:46: PM2 log: PM2 version          : 5.4.2
+2026-03-06T03:47:46: PM2 log: Node.js version      : 20.13.1
+2026-03-06T03:47:46: PM2 log: Current arch         : x64
+2026-03-06T03:47:46: PM2 log: PM2 home             : /home/906681.cloudwaysapps.com/krrgjqpeus/public_html/mulkmed/socket-server/.pm2
+2026-03-06T03:47:46: PM2 log: PM2 PID file         : /home/906681.cloudwaysapps.com/krrgjqpeus/public_html/mulkmed/socket-server/.pm2/pm2.pid
+2026-03-06T03:47:46: PM2 log: RPC socket file      : /home/906681.cloudwaysapps.com/krrgjqpeus/public_html/mulkmed/socket-server/.pm2/rpc.sock
+2026-03-06T03:47:46: PM2 log: BUS socket file      : /home/906681.cloudwaysapps.com/krrgjqpeus/public_html/mulkmed/socket-server/.pm2/pub.sock
+2026-03-06T03:47:46: PM2 log: Application log path : /home/906681.cloudwaysapps.com/krrgjqpeus/public_html/mulkmed/socket-server/.pm2/logs
+2026-03-06T03:47:46: PM2 log: Worker Interval      : 30000
+2026-03-06T03:47:46: PM2 log: Process dump file    : /home/906681.cloudwaysapps.com/krrgjqpeus/public_html/mulkmed/socket-server/.pm2/dump.pm2
+2026-03-06T03:47:46: PM2 log: Concurrent actions   : 2
+2026-03-06T03:47:46: PM2 log: SIGTERM timeout      : 1600
+2026-03-06T03:47:46: PM2 log: ===============================================================================
+2026-03-06T03:47:46: PM2 log: App [server:0] starting in -fork mode-
+2026-03-06T03:47:46: PM2 log: App [server:0] online
+2026-03-06T03:55:58: PM2 log: Stopping app:server id:0
+2026-03-06T03:55:58: PM2 log: App [server:0] exited with code [0] via signal [SIGINT]
+2026-03-06T03:55:58: PM2 log: pid=2534389 msg=process killed
+2026-03-06T03:55:58: PM2 log: App [server:0] starting in -fork mode-
+2026-03-06T03:55:58: PM2 log: App [server:0] online
+2026-03-06T04:41:39: PM2 log: Stopping app:server id:0
+2026-03-06T04:41:39: PM2 log: App [server:0] exited with code [0] via signal [SIGINT]
+2026-03-06T04:41:39: PM2 log: pid=2536217 msg=process killed
+2026-03-06T04:41:39: PM2 log: App [server:0] starting in -fork mode-
+2026-03-06T04:41:39: PM2 log: App [server:0] online
+2026-03-07T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-07T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-08T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-08T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-09T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-09T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-10T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-10T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-11T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-11T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-12T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-12T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-13T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-13T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-14T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-14T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-15T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-15T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-16T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-16T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-17T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-17T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-18T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-18T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-19T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-19T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-20T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-20T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-21T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-21T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-22T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-22T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-23T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-23T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-24T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-24T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-25T03:47:47: PM2 log: [PM2] This PM2 is not UP TO DATE
+2026-03-25T03:47:47: PM2 log: [PM2] Upgrade to version 6.0.14
+2026-03-25T23:10:59: PM2 log: pm2 has been killed by signal, dumping process list before exit...
+2026-03-25T23:10:59: PM2 log: Deleting process 0
+2026-03-25T23:10:59: PM2 log: Stopping app:server id:0
+2026-03-25T23:10:59: PM2 log: App [server:0] exited with code [0] via signal [SIGHUP]
+2026-03-25T23:11:00: PM2 log: pid=2551297 msg=process killed
+2026-03-25T23:11:00: PM2 log: Exited peacefully

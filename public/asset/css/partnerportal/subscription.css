@@ -1,0 +1,974 @@
+body {
+    margin: 0;
+    background: #eef6fd;
+    font-family: 'Inter', sans-serif;
+    overflow-x: hidden;
+}
+
+/* ===== LAYOUT ===== */
+.portal-layout {
+    display: flex;
+    min-height: 100vh;
+}
+
+.portal-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.portal-content {
+    padding: 50px 50px;
+}
+
+/* ===== CURRENT PLAN ===== */
+.current-plan {
+    background: linear-gradient(90deg, #1e88e5 0%, #4fc3f7 100%);
+    color: #fff;
+    border-radius: 4px;
+    padding: 24px 35px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+}
+
+.banner-label {
+    font-size: 14px;
+    font-weight: 500;
+    opacity: 0.9;
+    margin-bottom: 8px;
+}
+
+.plan-name {
+    font-size: 32px;
+    font-weight: 700;
+    margin: 0 0 10px 0;
+}
+
+.banner-expiry,
+.banner-details {
+    font-size: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    opacity: 0.9;
+}
+
+.banner-detail-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.remaining-riders {
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+.banner-year {
+    font-size: 24px;
+    font-weight: 800;
+    opacity: 0.8;
+    margin-bottom: 5px;
+}
+
+.rider-count {
+    font-size: 48px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+/* ===== CARDS ===== */
+.card-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-bottom: 26px;
+}
+
+.plan-card {
+    background: #fff;
+    border-radius: 20px;
+    padding: 25px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #f3f4f6;
+    min-height: 270px;
+}
+
+.plan-card:nth-child(3) {
+    align-items: center;
+    text-align: center;
+}
+
+.plan-card.active {
+    border: 1px solid #f3f4f6;
+    /* Removed the heavy blue border from screenshot */
+}
+
+.icon-box {
+    width: 48px;
+    height: 48px;
+    background: #f0f7ff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20px;
+    color: #3b82f6;
+    font-size: 18px;
+}
+
+.plan-card h6 {
+    font-size: 18px;
+    font-weight: 700;
+    color: #111827;
+    margin-bottom: 12px;
+}
+
+.plan-card .sub-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #111827;
+    margin-bottom: 8px;
+}
+
+.features-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 15px 0;
+}
+
+.features-list li {
+    font-size: 13px;
+    color: #64748b;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+}
+
+.offer-text {
+    font-size: 11px;
+    color: #ef4444;
+    font-weight: 600;
+    margin-top: auto;
+}
+
+.upcoming-text {
+    font-size: 28px;
+    font-weight: 700;
+    color: #3b82f6;
+    margin-top: auto;
+    opacity: 0.8;
+}
+
+/* ===== HISTORY ===== */
+/* ===== HISTORY ===== */
+.history-section {
+    background: #fff;
+    border-radius: 12px;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid #F3F4F6;
+}
+
+.history-header {
+    padding: 18px 25px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+}
+
+.history-header strong {
+    font-size: 18px;
+    font-weight: 600;
+    color: #1F2937;
+}
+
+.history-header .toggle-btn {
+    font-size: 14px;
+    color: #3B82F6;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.history-table {
+    border-top: 1px solid #F3F4F6;
+    padding: 10px;
+    display: none;
+}
+
+/* ===== TABLE HEADER STYLE ===== */
+.history-table thead th {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 600;
+    background-color: #F4F4F5;
+    font-size: 16px;
+    line-height: 100%;
+    letter-spacing: 0;
+    text-align: center;
+    color: #000000;
+    padding: 14px 10px;
+    vertical-align: middle;
+}
+
+/* ===== TABLE BODY ===== */
+.history-table tbody td {
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    color: #1f2937;
+    font-weight: 500;
+    text-align: left;
+    padding: 16px 15px;
+    vertical-align: middle;
+}
+
+/* Header alignment */
+.history-table thead th {
+    text-align: left;
+    padding: 14px 15px;
+    background: #f9fafb;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+/* Badges */
+.badge-prepaid {
+    background: #dcfce7;
+    color: #166534;
+    padding: 4px 12px;
+    border-radius: 99px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.badge-postpaid {
+    background: #ffedd5;
+    color: #9a3412;
+    padding: 4px 12px;
+    border-radius: 99px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* Service Type Icons */
+.service-icon {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+}
+
+.service-icon.inbound i {
+    color: #000;
+    transform: rotate(45deg);
+}
+
+.service-icon.outbound i {
+    color: #000;
+    transform: rotate(45deg);
+}
+
+/* Pagination */
+.custom-pagination {
+    font-family: 'Inter', sans-serif;
+}
+
+.pagination-next {
+    color: #3b82f6;
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 14px;
+}
+
+.pagination-next.disabled {
+    color: #94a3b8;
+    pointer-events: none;
+}
+
+.page-box {
+    border: 1px solid #e5e7eb;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #1f2937;
+}
+
+.page-of {
+    font-size: 14px;
+    color: #64748b;
+    font-weight: 500;
+}
+
+/* Hover effect for rows */
+.history-table tbody tr:hover {
+    background-color: #F9FAFB;
+}
+
+
+/* ===== MODAL REDESIGN ===== */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .5);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 2000;
+    backdrop-filter: blur(8px);
+}
+
+.modal-container {
+    position: relative;
+    max-width: 600px;
+    width: 90%;
+}
+
+.close-btn-outer {
+    position: absolute;
+    top: -60px;
+    right: 0;
+    background: rgba(255, 255, 255, 0.2);
+    border: 2px solid #fff;
+    color: #fff;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    font-size: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.close-btn-outer:hover {
+    background: #fff;
+    color: #000;
+}
+
+.modal-box {
+    background: #fff;
+    border-radius: 16px;
+    padding: 15px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    position: relative;
+    overflow: hidden;
+}
+
+.modal-header-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    gap: 10px;
+}
+
+.invoice-intro h2 {
+    font-size: 20px;
+    font-weight: 800;
+    color: #0C2133;
+    line-height: 1.1;
+    margin: 0 0 6px 0;
+}
+
+.invoice-intro p {
+    color: #607198;
+    font-size: 11px;
+    max-width: 250px;
+    margin: 0;
+}
+
+.current-plan-summary {
+    background: #eef2ff;
+    border-radius: 12px;
+    padding: 6px 10px;
+    min-width: 240px;
+    box-shadow: inset 0 0-10px rgba(59, 130, 246, 0.05);
+}
+
+.current-plan-summary.postpaid-summary {
+    background: #eef2ff;
+    min-width: 260px;
+}
+
+.summary-label {
+    font-size: 12px;
+    color: #607198;
+    font-weight: 500;
+    margin-bottom: 2px;
+}
+
+.summary-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.summary-main .plan-name {
+    font-size: 18px;
+    font-weight: 800;
+    color: #0C2133;
+}
+
+.summary-main .sep {
+    color: #607198;
+    font-size: 18px;
+    opacity: 0.2;
+    margin: 0 10px;
+}
+
+.riders-info {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+.riders-info small {
+    font-size: 11px;
+    color: #6b7280;
+    font-weight: 600;
+    margin-bottom: -2px;
+}
+
+.riders-info strong {
+    font-size: 20px;
+    font-weight: 800;
+    color: #0C2133;
+}
+
+.summary-details-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 2px;
+}
+
+.expiry-col {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.expiry-label {
+    font-size: 11px;
+    color: #4b5563;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.expiry-val {
+    font-size: 12px;
+    font-weight: 800;
+    color: #111827;
+    margin-left: 15px;
+}
+
+.invoice-card {
+    background: #eef6fd; /* Light base */
+    background-image: url("https://www.transparenttextures.com/patterns/cubes.png"), 
+                      radial-gradient(circle at 100% 100%, #3b82f6 0%, transparent 50%),
+                      radial-gradient(circle at 0% 100%, #60a5fa 0%, transparent 50%);
+    background-blend-mode: overlay;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 25px;
+    border: none !important;
+    position: relative;
+    overflow: hidden;
+    min-height: 250px;
+    border-radius: 24px;
+    box-shadow: 0 10px 25px rgba(59, 130, 246, 0.1);
+}
+
+/* Wavy effect using a pseudo-element if possible, or just a better gradient */
+.invoice-card::after {
+    content: "";
+    position: absolute;
+    bottom: -50px;
+    left: -10%;
+    width: 120%;
+    height: 150px;
+    background: linear-gradient(180deg, transparent 0%, #3b82f6 100%);
+    border-radius: 50%;
+    opacity: 0.2;
+    z-index: 0;
+}
+
+.invoice-card .content-wrapper {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.upcoming-invoice-view .invoice-intro {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 20px;
+}
+
+.upcoming-invoice-view .invoice-label {
+    font-size: 16px;
+    font-weight: 500;
+    color: #1f2937;
+    line-height: 1.3;
+}
+
+.upcoming-invoice-view .invoice-date {
+    font-size: 28px;
+    font-weight: 800;
+    color: #3b82f6;
+    line-height: 1;
+    margin-top: 5px;
+}
+
+.upcoming-invoice-view .subscribe-btn {
+    background: #3b82f6;
+    color: #fff;
+    border: none;
+    padding: 10px 30px;
+    width: fit-content;
+    border-radius: 99px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(59, 130, 246, 0.2);
+    transition: all 0.3s ease;
+    margin-bottom: 10px;
+}
+
+.upcoming-invoice-view .subscribe-btn:hover {
+    background: #2563eb;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 15px rgba(59, 130, 246, 0.3);
+}
+
+.upcoming-invoice-view .pay-now-btn {
+    background: #fff;
+    color: #4b5563;
+    border: none;
+    padding: 10px 30px;
+    width: fit-content;
+    border-radius: 99px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+    transition: all 0.3s ease;
+}
+
+.upcoming-invoice-view .pay-now-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.1);
+}
+
+.timer-section {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    text-align: right;
+}
+
+.banner-timer {
+    margin-left: auto;
+    margin-right: 40px;
+}
+
+.timer-label {
+    font-size: 11px;
+    color: #6b7280;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.timer-boxes {
+    display: flex;
+    justify-content: flex-end;
+    gap: 5px;
+}
+
+.timer-box {
+    background: #e0f2fe;
+    /* Light blue tint */
+    border: none;
+    border-radius: 6px;
+    padding: 4px 6px;
+    text-align: center;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.timer-box span {
+    font-size: 12px;
+    font-weight: 800;
+    color: #111827;
+    line-height: 1;
+}
+
+.timer-box small {
+    font-size: 8px;
+    color: #6b7280;
+    font-weight: 600;
+}
+
+/* Payment Card */
+.modal-body-content {
+    display: flex;
+    justify-content: center;
+    padding-top: 2px;
+}
+
+.plan-payment-card {
+    background: #fff;
+    width: 100%;
+    max-width: 320px;
+    border-radius: 16px;
+    padding: 20px 24px;
+    text-align: left;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+    border: 1px solid #F0F7FF;
+}
+
+.card-icon-circle-center {
+    width: 38px;
+    height: 38px;
+    background: #eef2ff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 12px auto;
+    color: #6366f1;
+    font-size: 16px;
+}
+
+.modal-card-title {
+    font-size: 16px;
+    font-weight: 800;
+    color: #0C2133;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.service-grid {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.service-column {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.service-badge {
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    width: fit-content;
+}
+
+.service-badge.inbound {
+    background: #f0f9ff;
+    color: #0c4a6e;
+}
+
+.service-badge.outbound {
+    background: #f0f9ff;
+    color: #0c4a6e;
+}
+
+.service-badge i {
+    font-size: 10px;
+}
+
+.detail-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.detail-item label {
+    font-size: 10px;
+    color: #64748b;
+    font-weight: 500;
+    margin-bottom: 2px;
+}
+
+.detail-item strong {
+    font-size: 13px;
+    font-weight: 700;
+    color: #111827;
+}
+
+.to-pay-row {
+    margin: 20px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pay-label {
+    font-size: 14px;
+    color: #64748b;
+    font-weight: 700;
+}
+
+.pay-currency {
+    font-size: 14px;
+    font-weight: 800;
+    color: #0C2133;
+    margin-top: 6px;
+}
+
+.pay-amount {
+    font-size: 34px;
+    font-weight: 800;
+    color: #0C2133;
+    line-height: 1;
+}
+
+.plan-features {
+    margin-bottom: 20px;
+}
+
+.feature-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #3b82f6;
+    margin-bottom: 8px;
+}
+
+.modal-rider-features {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.modal-rider-features li {
+    font-size: 12px;
+    color: #64748b;
+    font-weight: 600;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+}
+
+.modal-rider-features li::before {
+    content: "•";
+    margin-right: 8px;
+    color: #64748b;
+}
+
+.valid-till {
+    font-size: 11px;
+    color: #ef4444;
+    font-weight: 700;
+    margin-bottom: 15px;
+}
+
+.btn-pay-modal {
+    background: #0ea5e9;
+    color: #fff;
+    border: none;
+    width: 100%;
+    padding: 12px;
+    border-radius: 99px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.3s;
+    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2);
+}
+
+.btn-pay-modal:hover {
+    background: #0284c7;
+    transform: translateY(-1px);
+}
+
+/* ===== RESPONSIVENESS ===== */
+
+/* Tablet View */
+@media (max-width: 1024px) {
+    .portal-content {
+        padding: 30px 20px;
+    }
+
+    .card-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* Mobile View */
+@media (max-width: 768px) {
+    .portal-content {
+        padding: 20px 15px;
+    }
+
+    .current-plan {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 20px;
+        border-radius: 12px;
+    }
+
+    .remaining {
+        width: 100%;
+        text-align: left;
+    }
+
+    .card-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* Modal Mobile Fixes */
+    .modal-overlay {
+        padding: 20px;
+        align-items: flex-start;
+        overflow-y: auto;
+    }
+
+    .modal-container {
+        margin-top: 60px;
+        width: 100%;
+    }
+
+    .modal-box {
+        padding: 20px;
+        border-radius: 20px;
+    }
+
+    .modal-header-container {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 20px;
+    }
+
+    .current-plan-summary {
+        width: 100%;
+        max-width: none;
+    }
+
+    .plan-payment-card {
+        padding: 20px;
+        border-radius: 16px;
+    }
+
+    .plan-price {
+        font-size: 40px;
+    }
+
+    .close-btn-outer {
+        top: -50px;
+        right: 10px;
+        width: 36px;
+        height: 36px;
+        font-size: 20px;
+    }
+}
+
+.no-subscription-header {
+    text-align: center;
+    padding: 10px 0 20px 0;
+    width: 100%;
+}
+
+.modal-title-main {
+    font-size: 24px;
+    font-weight: 800;
+    color: #111827;
+    margin-bottom: 8px;
+    line-height: 1.2;
+}
+
+.modal-subtitle-main {
+    font-size: 13px;
+    color: #64748b;
+    font-weight: 500;
+    max-width: 450px;
+    margin: 0 auto;
+    line-height: 1.5;
+}
+.service-split-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+}
+
+.split-card {
+    background: #f6faff;
+    border-radius: 12px;
+    padding: 12px;
+}
+
+.split-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.split-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+}
+
+.expiry-warning-msg {
+    color: #ff4d4d;
+    font-weight: 600;
+    font-size: 16px;
+    margin-top: 12px;
+}
+
+.invoice-intro {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* "Upcoming Invoices" */
+.invoice-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: #0f172a; /* dark */
+}
+
+/* "of Feb 2026" */
+.invoice-date {
+    font-size: 22px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+/* Sub text */
+.invoice-subtext {
+    font-size: 14px;
+    color: #64748b; /* muted */
+    margin-top: 4px;
+}

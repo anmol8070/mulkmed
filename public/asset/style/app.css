@@ -1,0 +1,434 @@
+.bg-topRated {
+    background: linear-gradient(180deg, #dfc298 0%, #bb996e 100%) !important;
+}
+
+.activeLi {
+    background-color: #0080cb;
+    /* background-color: rgb(22, 1, 1) !important; */
+    margin: 5px 10px !important;
+    border-radius: 10px;
+    padding: 0px 0px !important;
+    color: white !important;
+}
+
+.activeLi a i {
+    color: white !important;
+}
+
+.activeLi a span {
+    color: white !important;
+}
+
+.sidebar-menu li {
+    margin: 8px 10px !important;
+    border-radius: 5px !important;
+}
+
+.sidebar-menu li a:hover {
+    border-radius: 5px !important;
+    color: white !important;
+    background-color: rgb(65, 65, 65) !important;
+}
+
+.sidebar-menu li a:hover i {
+    color: white !important;
+}
+
+.sidebar-menu li a:hover span {
+    color: white !important;
+}
+
+.commonHealthProblemsSideA, .specialityWiseDiseasesSideA .nav-link span {
+    line-height: 1.3;
+}
+
+/*
+i {
+    color: white;
+}
+
+input:focus {
+    border-color: #FC3901 !important;
+}
+
+textarea:focus {
+    border-color: #FC3901 !important;
+}
+
+select:focus {
+    border-color: #FC3901 !important;
+}
+
+.btn-primary {
+    background-image: linear-gradient(to top,#F61D80, #9207FF) !important;
+
+}
+
+.nav-pills .active {
+    background-image: linear-gradient(to top,#F61D80, #9207FF) !important;
+
+}
+
+.pagination .active a {
+    border: 1px solid #F61D80 !important;
+    background-image: linear-gradient(to top,#F61D80, #9207FF) !important;
+} */
+
+table.dataTable th,
+table.dataTable td {
+    vertical-align: middle;
+    /* white-space: nowrap !important; */
+}
+
+.card {
+    box-shadow: none !important;
+}
+
+.dataTables_filter {
+    text-align: right;
+}
+.dataTables_filter label {
+    display: inline-flex;
+    align-items: center;
+}
+.dataTables_filter label input {
+    margin-left: 10px;
+}
+.dataTables_length label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+}
+.dataTables_length label select {
+    margin: 0 10px;
+}
+.pagination {
+    justify-content: flex-end;
+}
+
+span.summery_scroll {
+    width: 800px;
+    display: inline-block;
+    height: 100px;
+    overflow: auto;
+}
+
+.summery_scroll::-webkit-scrollbar {
+    width: 4px;
+}
+
+.summery_scroll::-webkit-scrollbar-thumb {
+    background-color: rgb(177, 177, 177);
+    /* outline: 1px solid slategrey; */
+}
+
+/* Sidebar mini mode — keep icons visible, no overlap with content */
+body.sidebar-mini .main-sidebar {
+    width: 65px !important;
+    left: 0 !important;
+    position: fixed !important;
+    top: 0;
+    bottom: 0;
+    height: 100vh;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    background-color: #fff !important;
+    z-index: 1030 !important;
+    box-shadow: 0 0 15px rgba(0, 0, 0, 0.08);
+    transition: width 0.28s ease;
+}
+
+/* Stisla ::after strip goes behind content; neutralize it */
+body.sidebar-mini .main-sidebar:after {
+    display: none !important;
+}
+
+body.sidebar-mini .navbar {
+    left: 65px !important;
+}
+
+body.sidebar-mini .main-content,
+body.sidebar-mini .main-footer {
+    padding-left: 95px !important;
+}
+
+body.sidebar-mini .main-sidebar .sidebar-brand {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 0;
+    margin-bottom: 8px !important;
+}
+
+body.sidebar-mini .main-sidebar .logo-name,
+body.sidebar-mini .main-sidebar .sidebar-brand img {
+    display: none !important;
+}
+
+body.sidebar-mini .main-sidebar .sidebar-menu {
+    padding: 0 6px;
+}
+
+body.sidebar-mini .main-sidebar .sidebar-menu > li {
+    padding: 4px 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+}
+
+/* Icon-only buttons, centered, no caret / label clipping */
+body.sidebar-mini .main-sidebar .sidebar-menu > li > a,
+body.sidebar-mini .main-sidebar .sidebar-menu > li > a.nav-link.has-dropdown {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    height: 45px !important;
+    min-height: 45px !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-radius: 8px !important;
+    overflow: visible !important;
+}
+
+body.sidebar-mini .main-sidebar .sidebar-menu > li > a span,
+body.sidebar-mini .main-sidebar .sidebar-menu > li.active > a span {
+    display: none !important;
+}
+
+body.sidebar-mini .main-sidebar .sidebar-menu > li > a.nav-link.has-dropdown::after,
+body.sidebar-mini .main-sidebar .sidebar-menu > li > a.has-dropdown:after {
+    display: none !important;
+    content: none !important;
+}
+
+body.sidebar-mini .main-sidebar .sidebar-menu > li > a i,
+body.sidebar-mini .main-sidebar .sidebar-menu > li > a .fas,
+body.sidebar-mini .main-sidebar .sidebar-menu > li > a .far,
+body.sidebar-mini .main-sidebar .sidebar-menu > li > a .fab,
+body.sidebar-mini .main-sidebar .sidebar-menu > li > a .fal,
+body.sidebar-mini .main-sidebar .sidebar-menu > li > a .feather {
+    display: inline-block !important;
+    margin: 0 !important;
+    font-size: 18px !important;
+    line-height: 1 !important;
+    width: auto !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+body.sidebar-mini .main-sidebar .sidebar-menu > li.active > a {
+    background-color: #0080cb !important;
+    color: #fff !important;
+}
+
+body.sidebar-mini .main-sidebar .sidebar-menu > li.active > a i,
+body.sidebar-mini .main-sidebar .sidebar-menu > li.active > a .fas,
+body.sidebar-mini .main-sidebar .sidebar-menu > li.active > a .far,
+body.sidebar-mini .main-sidebar .sidebar-menu > li.active > a .fab,
+body.sidebar-mini .main-sidebar .sidebar-menu > li.active > a .fal {
+    color: #fff !important;
+}
+
+/* Never show nested menus while collapsed */
+body.sidebar-mini .main-sidebar .sidebar-menu li.dropdown .dropdown-menu,
+body.sidebar-mini .main-sidebar .sidebar-menu > li:hover > ul.dropdown-menu,
+body.sidebar-mini .main-sidebar .sidebar-menu > li ul.dropdown-menu {
+    display: none !important;
+}
+
+/* Hover expands sidebar over content (content keeps mini padding) */
+body.sidebar-mini .main-sidebar:hover {
+    width: 250px !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    box-shadow: 0 4px 25px rgba(0, 0, 0, 0.12);
+}
+
+body.sidebar-mini .main-sidebar:hover .sidebar-menu > li > a,
+body.sidebar-mini .main-sidebar:hover .sidebar-menu > li > a.nav-link.has-dropdown {
+    justify-content: flex-start !important;
+    padding: 10px 14px !important;
+    height: auto !important;
+    min-height: 40px !important;
+}
+
+body.sidebar-mini .main-sidebar:hover .sidebar-menu > li > a span,
+body.sidebar-mini .main-sidebar:hover .sidebar-menu > li.active > a span {
+    display: inline !important;
+    position: static !important;
+    max-width: 170px !important;
+    opacity: 1 !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+    text-overflow: ellipsis;
+    background: transparent !important;
+    color: inherit !important;
+    padding: 0 !important;
+    margin-left: 10px;
+    box-shadow: none !important;
+}
+
+body.sidebar-mini .main-sidebar:hover .sidebar-menu > li > a i,
+body.sidebar-mini .main-sidebar:hover .sidebar-menu > li > a .fas,
+body.sidebar-mini .main-sidebar:hover .sidebar-menu > li > a .far,
+body.sidebar-mini .main-sidebar:hover .sidebar-menu > li > a .fab,
+body.sidebar-mini .main-sidebar:hover .sidebar-menu > li > a .fal {
+    margin-right: 0 !important;
+}
+
+body.sidebar-mini .main-sidebar:hover .sidebar-menu > li > a.nav-link.has-dropdown::after {
+    display: block !important;
+    content: "\f078" !important;
+}
+
+body.sidebar-mini .main-sidebar:hover .sidebar-menu > li.open > ul.dropdown-menu,
+body.sidebar-mini .main-sidebar:hover .sidebar-menu > li.active.open > ul.dropdown-menu,
+body.sidebar-mini .main-sidebar:hover .sidebar-menu li.dropdown.open > ul.dropdown-menu,
+body.sidebar-mini .main-sidebar:hover .sidebar-menu li.dropdown.active.open > ul.dropdown-menu {
+    display: block !important;
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    box-shadow: none !important;
+    padding: 0 0 0 12px !important;
+    background: transparent !important;
+}
+
+/* Prevent overlap for long sidebar labels in all menus */
+.main-sidebar .sidebar-menu > li > a,
+.main-sidebar .sidebar-menu li ul.dropdown-menu li > a {
+    height: auto !important;
+    min-height: 40px;
+    line-height: 1.4 !important;
+    white-space: normal !important;
+    word-break: break-word;
+    display: flex !important;
+    align-items: flex-start !important;
+    padding-top: 10px !important;
+    padding-bottom: 10px !important;
+}
+
+.main-sidebar .sidebar-menu li ul.dropdown-menu li {
+    margin-bottom: 6px;
+}
+
+/* Active sub-menu should look like a full blue bar */
+.main-sidebar .sidebar-menu li ul.dropdown-menu li.active > a {
+    width: 100% !important;
+    margin: 0 !important;
+    border-radius: 6px !important;
+    background-color: #0f86c9 !important;
+    color: #fff !important;
+    font-weight: 600 !important;
+}
+
+.main-sidebar .sidebar-menu li ul.dropdown-menu li.active > a i,
+.main-sidebar .sidebar-menu li ul.dropdown-menu li.active > a span {
+    color: #fff !important;
+}
+
+/* Gray dropdown icon for all sidebar parent options */
+.main-sidebar .sidebar-menu > li > a.nav-link.has-dropdown {
+    padding-right: 34px !important;
+}
+
+.main-sidebar .sidebar-menu > li > a.nav-link.has-dropdown::after {
+    content: "\f078";
+    font-family: "Font Awesome 5 Free";
+    font-weight: 900;
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px;
+    color: #8d95a3 !important;
+    transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.main-sidebar .sidebar-menu > li.active > a.nav-link.has-dropdown::after {
+    transform: translateY(-50%) rotate(180deg);
+    color: #6f7785 !important;
+}
+
+/* Hide legacy plus/minus toggles to avoid duplicate icons */
+.main-sidebar .sidebar-menu li .menu-toggle:before,
+.main-sidebar .sidebar-menu li .menu-toggle:after {
+    display: none !important;
+}
+
+/* Strong override for inline sidebar styles (fix active cut shape) */
+html body .main-sidebar.sidebar-style-2 .sidebar-menu li.dropdown .dropdown-menu li.active {
+    background: transparent !important;
+    border-radius: 0 !important;
+}
+
+html body .main-sidebar.sidebar-style-2 .sidebar-menu li.dropdown .dropdown-menu li.active > a {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 10px 14px !important;
+    border-radius: 6px !important;
+    background: #0f86c9 !important;
+    color: #fff !important;
+    box-shadow: none !important;
+}
+
+html body .main-sidebar.sidebar-style-2 .sidebar-menu li.dropdown .dropdown-menu li.active > a:hover {
+    background: #0f86c9 !important;
+    color: #fff !important;
+}
+
+html body .main-sidebar.sidebar-style-2 .sidebar-menu li.dropdown .dropdown-menu li.active > a i,
+html body .main-sidebar.sidebar-style-2 .sidebar-menu li.dropdown .dropdown-menu li.active > a span {
+    color: #fff !important;
+}
+
+/* Sidebar order as per requested sequence (admin sidebar) */
+.main-sidebar .sidebar-menu {
+    display: flex;
+    flex-direction: column;
+}
+
+.main-sidebar .sidebar-menu > li.sideBarli {
+    order: 99;
+}
+
+.main-sidebar .sidebar-menu > li.menu-dashboard { order: 1; }
+.main-sidebar .sidebar-menu > li.menu-home { order: 2; }
+.main-sidebar .sidebar-menu > li.menu-doctors { order: 3; }
+.main-sidebar .sidebar-menu > li.menu-patient { order: 4; }
+.main-sidebar .sidebar-menu > li.menu-tourist { order: 5; }
+.main-sidebar .sidebar-menu > li.menu-smo { order: 6; }
+.main-sidebar .sidebar-menu > li.menu-bulk-upload-smo { order: 7; }
+.main-sidebar .sidebar-menu > li.menu-bidding { order: 8; }
+.main-sidebar .sidebar-menu > li.menu-best-offers { order: 9; }
+.main-sidebar .sidebar-menu > li.menu-mulk-cards { order: 10; }
+.main-sidebar .sidebar-menu > li.menu-order-medicine { order: 12; }
+
+/* Keep remaining existing sections after requested ordered items */
+.main-sidebar .sidebar-menu > li.menu-business { order: 20; }
+.main-sidebar .sidebar-menu > li.menu-online-consultation { order: 21; }
+.main-sidebar .sidebar-menu > li.menu-other-data { order: 22; }
+.main-sidebar .sidebar-menu > li.menu-pages { order: 23; }
+
+/* Ensure sidebar + dropdowns never visually overlap content on any screen */
+.main-sidebar {
+    max-height: 100vh;
+    overflow-y: auto;
+}
+
+/* When sidebar is shown as overlay on small screens, make its content scroll instead of overflowing */
+body.sidebar-show .main-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: auto;
+}
+
+/* Nested dropdown menus: stack vertically, no overlap */
+.main-sidebar .sidebar-menu li.dropdown .dropdown-menu {
+    position: static !important;
+    width: 100% !important;
+}
+

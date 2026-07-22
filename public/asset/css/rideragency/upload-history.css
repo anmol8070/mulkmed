@@ -1,0 +1,294 @@
+/* ===== FONTS ===== */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+
+body {
+    font-family: 'Poppins', sans-serif;
+    background-color: #F8FAFC;
+}
+
+/* ===== FILTER CARD ===== */
+.card {
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 25px;
+    margin-bottom: 25px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+    border: none;
+}
+
+.filter-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr auto;
+    gap: 20px;
+    align-items: flex-end;
+}
+
+.input-group-custom {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+label {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #0C2133;
+}
+
+.input-container {
+    position: relative;
+    width: 100%;
+}
+
+select,
+input[type="date"] {
+    width: 100%;
+    padding: 12px 15px;
+    padding-right: 40px;
+    /* Space for icon */
+    font-size: 13px;
+    border: 1.5px solid #E2E8F0;
+    border-radius: 12px;
+    background-color: #fff;
+    color: #64748B;
+    appearance: none;
+    -webkit-appearance: none;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+
+select:focus,
+input[type="date"]:focus {
+    border-color: #0284c7;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.1);
+}
+
+.input-container i {
+    position: absolute;
+    right: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #94A3B8;
+    pointer-events: none;
+    font-size: 14px;
+}
+
+.btn-primary {
+    background: #0284c7;
+    color: #fff;
+    border: none;
+    padding: 12px 30px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+    height: 46px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-primary:hover {
+    background: #026ca3;
+}
+
+/* ===== TABLE STYLING ===== */
+table {
+    width: 100%;
+    background: #ffffff;
+    border-radius: 20px;
+    border-collapse: separate;
+    border-spacing: 0;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+}
+
+th,
+td {
+    padding: 18px 25px;
+    font-size: 13px;
+    border-bottom: 1.5px solid #F1F5F9;
+    text-align: left;
+    vertical-align: middle;
+}
+
+th {
+    background: #EDF6FF;
+    color: #0C2133;
+    font-weight: 700;
+    text-transform: none;
+    border-bottom: none;
+}
+
+tr:last-child td {
+    border-bottom: none;
+}
+
+/* ===== BADGES ===== */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.badge-visa {
+    background: #F1F8FF;
+    color: #0C2133;
+    border: 1px solid #DCEBFF;
+}
+
+.badge-hotel {
+    background: #F1F8FF;
+    color: #0C2133;
+    border: 1px solid #EDE9FE;
+}
+
+.badge-travel {
+    background: #F1F8FF;
+    color: #0C2133;
+    border: 1px solid #DBEAFE;
+}
+
+.badge i {
+    font-size: 14px;
+}
+
+/* ===== FILE DISPLAY ===== */
+.file-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #374151;
+    font-weight: 500;
+}
+
+.file-wrapper i {
+    color: #15803D;
+    font-size: 16px;
+}
+
+/* ===== ACTIONS ===== */
+.action-links {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #94A3B8;
+}
+
+.action-link {
+    color: #008CC3;
+    font-size: 13px;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.action-link:hover {
+    text-decoration: underline;
+}
+
+.link-sep {
+    color: #CBD5E1;
+    font-weight: 300;
+}
+
+/* ===== MODAL STYLING ===== */
+.modal-custom {
+    display: none;
+    position: fixed;
+    z-index: 1050;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(4px);
+    transition: opacity 0.3s ease;
+}
+
+.modal-content-custom {
+    background-color: #fefefe;
+    margin: 10% auto;
+    padding: 0;
+    border: none;
+    width: 80%;
+    max-width: 1024px;
+    border-radius: 20px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+}
+
+.modal-header-custom {
+    padding: 10px 30px 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    border-bottom: 1.5px solid #F1F5F9;
+}
+
+.modal-header-custom h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: #0C2133;
+}
+
+.modal-body-custom {
+    /* padding: 30px; */
+}
+
+.close-modal {
+    margin-left: auto;
+    color: #94A3B8;
+    font-size: 24px;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.close-modal:hover {
+    color: #0C2133;
+}
+
+/* Modal Table */
+.modal-body-custom table {
+    box-shadow: none;
+    border: 1px solid #F1F5F9;
+}
+
+.modal-body-custom th {
+    background: #F4F4F5;
+    padding: 15px 20px;
+    font-size: 12px;
+}
+
+.modal-body-custom td {
+    padding: 12px 20px;
+    font-size: 12px;
+    font-weight: 400;
+    color: #000000;
+}
+
+/* Hide default browser datepicker icon but keep click behavior */
+input[type="date"] {
+    position: relative;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    opacity: 0;
+    cursor: pointer;
+}

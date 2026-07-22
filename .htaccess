@@ -1,0 +1,37 @@
+#RewriteEngine On
+
+#RewriteCond %{REQUEST_FILENAME} -d [OR]
+#RewriteCond %{REQUEST_FILENAME} -f
+#RewriteRule ^ ^$1 [N]
+
+#RewriteCond %{REQUEST_URI} (\.\w+$) [NC]
+#RewriteRule ^(.*)$ public/$1
+
+#RewriteCond %{REQUEST_FILENAME} !-d
+#RewriteCond %{REQUEST_FILENAME} !-f
+#RewriteRule ^ server.php
+
+RewriteEngine On
+
+
+
+RewriteCond %{REQUEST_URI} ^/flutterproject/web
+RewriteRule ^ - [L]
+
+
+
+# If requesting an existing file or directory, serve it
+RewriteCond %{REQUEST_FILENAME} -d [OR]
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteRule ^ ^$1 [N]
+
+# For public assets
+RewriteCond %{REQUEST_URI} (\.\w+$) [NC]
+RewriteRule ^(.*)$ public/$1
+
+# All other requests → Laravel server.php
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^ server.php
+
+

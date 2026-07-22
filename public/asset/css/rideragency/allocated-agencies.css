@@ -1,0 +1,184 @@
+/* ===== HEADER AREA ===== */
+.page-header {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 30px;
+    margin-top: 10px;
+}
+
+.search-box {
+    position: relative;
+    width: 320px;
+}
+
+.search-box input {
+    width: 100%;
+    padding: 10px 15px 10px 45px;
+    border-radius: 12px;
+    border: 1.5px solid #E5E7EB;
+    font-size: 14px;
+    background: #fff;
+    color: #374151;
+    transition: all 0.2s;
+}
+
+.search-box i {
+    position: absolute;
+    left: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #9CA3AF;
+    font-size: 16px;
+}
+
+/* ===== TABLE STYLING ===== */
+.table-container {
+    background: #ffffff;
+    border-radius: 20px;
+    overflow-x: auto;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+
+.table-custom {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0;
+}
+
+.table-custom thead th {
+    background: #EDF6FF;
+    /* Sky blue tint from screenshot */
+    padding: 20px 25px;
+    text-align: left;
+    font-size: 13px;
+    font-weight: 700;
+    color: #0C2133;
+    border: none;
+    white-space: nowrap;
+}
+
+.table-custom tbody td {
+    padding: 20px 25px;
+    font-size: 13px;
+    color: #374151;
+    border-bottom: 1.5px solid #F8FAFC;
+    vertical-align: middle;
+}
+
+/* ===== BADGES ===== */
+.agency-type {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 10px;
+    background: #F1F8FF;
+    border: 1px solid #DCEBFF;
+    font-size: 12px;
+    color: #008CC3;
+    font-weight: 600;
+}
+
+.agency-type i {
+    font-size: 13px;
+}
+
+.payment-badge {
+    display: inline-block;
+    padding: 6px 18px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.payment-badge.prepaid {
+    background: #DCFCE7;
+    color: #166534;
+}
+
+.payment-badge.postpaid {
+    background: #FFEDD5;
+    color: #9A3412;
+}
+
+/* ===== SERVICE TYPE ===== */
+.service-type-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #0C2133;
+    margin-bottom: 4px;
+}
+
+.service-type-item:last-child {
+    margin-bottom: 0;
+}
+
+.service-type-item i {
+    font-size: 12px;
+    color: #0C2133;
+}
+
+/* ===== ACTION ===== */
+.edit-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #008CC3;
+    font-weight: 600;
+    text-decoration: none;
+    font-size: 12px;
+}
+
+.edit-link:hover {
+    color: #0077a8;
+}
+
+.bold-text {
+    font-weight: 700;
+    color: #0C2133;
+}
+
+/* ===== RESPONSIVENESS ===== */
+@media (max-width: 992px) {
+
+    .table-custom thead th,
+    .table-custom tbody td {
+        padding: 15px 15px;
+    }
+}
+
+@media (max-width: 768px) {
+    .page-header {
+        flex-direction: column;
+        gap: 15px;
+        align-items: stretch;
+    }
+
+    .search-box {
+        width: 100%;
+    }
+
+    /* Responsive Table Wrapper */
+    .table-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .table-custom {
+        min-width: 900px;
+        /* Force scroll to maintain layout */
+    }
+
+    .table-custom thead th {
+        padding: 15px 12px;
+        font-size: 12px;
+    }
+
+    .table-custom tbody td {
+        padding: 12px 12px;
+        font-size: 12px;
+    }
+}

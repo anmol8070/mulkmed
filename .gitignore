@@ -1,0 +1,64 @@
+# Dependencies
+/node_modules
+/vendor
+/doctorio_backend/node_modules
+/doctorio_backend/vendor
+/socket-server/node_modules
+
+# Environment & secrets
+.env
+.env.backup
+.env.*.local
+*.pem
+googleCredentials.json
+**/firebase_credentials.json
+**/firebase-credentials.json
+**/serviceAccount*.json
+**/google-credentials.json
+
+# Laravel
+/public/hot
+/public/storage
+/storage/*.key
+/storage/pail
+/storage/logs/*
+!/storage/logs/.gitignore
+/storage/framework/cache/*
+!/storage/framework/cache/.gitignore
+/storage/framework/cache/data/*
+!/storage/framework/cache/data/.gitignore
+/storage/framework/sessions/*
+!/storage/framework/sessions/.gitignore
+/storage/framework/testing/*
+!/storage/framework/testing/.gitignore
+/storage/framework/views/*
+!/storage/framework/views/.gitignore
+/bootstrap/cache/*.php
+!/bootstrap/cache/.gitignore
+
+# Testing & build
+.phpunit.result.cache
+/coverage
+/public/build
+/public/mix-manifest.json
+npm-debug.log
+yarn-error.log
+pnpm-debug.log
+
+# IDE & OS
+/.idea
+/.vscode
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Homestead / Docker overrides
+Homestead.json
+Homestead.yaml
+docker-compose.override.yml
+
+# Misc
+/assets_old
+satisfiable

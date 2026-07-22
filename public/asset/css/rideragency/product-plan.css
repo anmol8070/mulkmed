@@ -1,0 +1,222 @@
+/* =====================================================
+   MY PRODUCT PLAN – FINAL CSS
+===================================================== */
+
+/* PAGE WRAPPER */
+.product-plan-wrapper {
+    padding: 24px;
+    background: #f5faff;
+    min-height: calc(100vh - 80px);
+}
+
+/* HEADER */
+.product-plan-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.product-plan-header h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #111827;
+}
+
+/* BUTTONS */
+.btn-primary {
+    background: #0ea5e9;
+    color: #ffffff;
+    border: none;
+    padding: 8px 18px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.btn-primary:hover {
+    background: #0284c7;
+}
+
+.btn-cancel {
+    background: #f1f5f9;
+    color: #374151;
+    border: none;
+    padding: 8px 18px;
+    border-radius: 20px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+/* EMPTY STATE */
+.empty-state {
+    background: #eef6ff;
+    border-radius: 14px;
+    padding: 80px 20px;
+    text-align: center;
+    margin-top: 40px;
+}
+
+.empty-icon {
+    font-size: 42px;
+    margin-bottom: 10px;
+}
+
+.empty-state h4 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.empty-state p {
+    font-size: 13px;
+    color: #6b7280;
+    margin: 6px 0 14px;
+}
+
+/* PLAN LIST */
+.plan-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 18px;
+}
+
+/* PLAN CARD */
+.plan-card {
+    position: relative;
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+    border: 1px solid #e5e7eb;
+}
+
+.plan-card h4 {
+    margin-top: 20px;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.plan-card p {
+    font-size: 14px;
+    color: #6b7280;
+}
+
+/* CARD ACTIONS */
+.plan-actions {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    display: flex;
+    gap: 12px;
+    font-size: 14px;
+}
+
+.plan-actions a {
+    cursor: pointer;
+    font-weight: 500;
+    text-decoration: none;
+}
+
+/* ================= MODAL ================= */
+
+/* OVERLAY */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 1000;
+}
+
+/* MODAL CONTAINER */
+.plan-modal {
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: #ffffff;
+    border-radius: 14px;
+    width: 520px;
+    z-index: 1001;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+}
+
+/* MODAL HEADER */
+.plan-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 18px 20px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.plan-modal-header h4 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.plan-modal-header p {
+    margin-top: 4px;
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.close-btn {
+    font-size: 20px;
+    cursor: pointer;
+    color: #6b7280;
+}
+
+/* MODAL BODY */
+.plan-modal-body {
+    padding: 20px;
+}
+
+.form-group {
+    margin-bottom: 16px;
+}
+
+.plan-modal-body label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 6px;
+    color: #111827;
+}
+
+.plan-modal-body input,
+.plan-modal-body textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid #d1d5db;
+    font-size: 14px;
+}
+
+.plan-modal-body textarea {
+    resize: none;
+    height: 80px;
+}
+
+/* MODAL FOOTER */
+.plan-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 16px 20px;
+    border-top: 1px solid #e5e7eb;
+}
+
+
+
+/* RESPONSIVE */
+@media (max-width: 480px) {
+    .plan-modal {
+        width: 92%;
+    }
+}

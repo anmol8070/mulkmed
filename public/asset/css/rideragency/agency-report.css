@@ -1,0 +1,305 @@
+
+        /* ===== TOP TITLE ===== */
+        .page-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 14px;
+            color: #111827;
+        }
+
+        /* ===== INFO WRAPPER (BLUE SECTION) ===== */
+        .info-wrapper {
+            background: #eaf5ff;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 22px;
+        }
+
+        /* ===== BACK BUTTON ===== */
+        .back-btn {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: #ffffff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #0284c7;
+            text-decoration: none;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            margin-bottom: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .back-btn:hover {
+            background: #f0f9ff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        /* ===== AGENCY INFO ===== */
+        .agency-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .agency-left {
+            display: flex;
+            gap: 14px;
+            align-items: center;
+        }
+
+        .agency-left img {
+            width: 70px;
+            height: 70px;
+            border-radius: 10px;
+            object-fit: cover;
+            border: 1px solid #e5e7eb;
+        }
+
+        .agency-name {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: #111827;
+        }
+
+        .agency-meta {
+            font-size: 13px;
+            color: #64748b;
+            line-height: 1.5;
+        }
+
+        .agency-id {
+            font-weight: 500;
+            color: #475569;
+            margin-bottom: 4px;
+        }
+
+        .agency-address {
+            color: #64748b;
+        }
+
+        .agency-right {
+            text-align: right;
+            font-size: 13px;
+            color: #64748b;
+            padding: 12px 16px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+
+        .agency-right strong {
+            display: block;
+            font-size: 20px;
+            color: #0284c7;
+            margin-top: 4px;
+            font-weight: 700;
+        }
+
+        /* ===== TRANSACTION CARD ===== */
+        .card {
+            background: #ffffff;
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        .card h4 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 18px;
+            color: #111827;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #e5e7eb;
+        }
+
+        th, td {
+            padding: 14px 16px;
+            font-size: 13px;
+            border-bottom: 1px solid #e5e7eb;
+            text-align: left;
+        }
+
+        th {
+            background: #f8fafc;
+            font-weight: 600;
+            color: #475569;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background: #f8fafc;
+        }
+
+        .download {
+            color: #0284c7;
+            font-size: 13px;
+            text-decoration: none;
+            white-space: nowrap;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .download:hover {
+            background: #f0f9ff;
+            color: #0369a1;
+        }
+
+        .download i {
+            font-size: 12px;
+        }
+
+        .date-sup {
+            font-size: 10px;
+            vertical-align: super;
+            margin-left: 1px;
+        }
+    /* =====================================================
+   RESPONSIVE STYLES – AGENCY REPORT PAGE
+===================================================== */
+
+/* ---------- TABLET (≤ 1024px) ---------- */
+@media (max-width: 1024px) {
+
+    .agency-info {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 16px;
+    }
+
+    .agency-right {
+        width: 100%;
+        text-align: left;
+    }
+
+    .card {
+        padding: 20px;
+    }
+
+    th, td {
+        padding: 12px;
+        font-size: 12.5px;
+    }
+}
+
+/* ---------- MOBILE (≤ 768px) ---------- */
+@media (max-width: 768px) {
+
+    .page-title {
+        font-size: 16px;
+    }
+
+    .info-wrapper {
+        padding: 16px;
+        border-radius: 14px;
+    }
+
+    /* Back button */
+    .back-btn {
+        width: 30px;
+        height: 30px;
+    }
+
+    /* Agency info */
+    .agency-left {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .agency-left img {
+        width: 56px;
+        height: 56px;
+    }
+
+    .agency-name {
+        font-size: 16px;
+    }
+
+    .agency-meta {
+        font-size: 12px;
+    }
+
+    .agency-right {
+        padding: 10px 14px;
+        font-size: 12px;
+    }
+
+    .agency-right strong {
+        font-size: 18px;
+    }
+
+    /* Card */
+    .card {
+        padding: 16px;
+        border-radius: 14px;
+    }
+
+    .card h4 {
+        font-size: 15px;
+    }
+
+    /* Table → horizontal scroll */
+    table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+    }
+
+    th, td {
+        padding: 10px 12px;
+        font-size: 12px;
+    }
+
+    /* Download button */
+    .download {
+        font-size: 12px;
+        padding: 5px 10px;
+    }
+}
+
+/* ---------- SMALL MOBILE (≤ 480px) ---------- */
+@media (max-width: 480px) {
+
+    .page-title {
+        font-size: 15px;
+    }
+
+    .agency-name {
+        font-size: 15px;
+    }
+
+    .agency-right strong {
+        font-size: 16px;
+    }
+
+    .card h4 {
+        font-size: 14px;
+    }
+
+    .download {
+        font-size: 11px;
+        padding: 4px 8px;
+    }
+
+    .date-sup {
+        font-size: 9px;
+    }
+}

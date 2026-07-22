@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <base href="/app_web/">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="A new Flutter project.">
+
+  <meta http-equiv="Permissions-Policy"
+    content="camera=(self), microphone=(self), autoplay=(self), display-capture=(self), fullscreen=(self), screen-wake-lock=(self), clipboard-write=(self), hid=(self)">
+
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="doctor_flutter">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <link rel="icon" type="image/png" href="favicon.png" />
+
+  <title>MulkMed Doctor</title>
+  <link rel="manifest" href="/app_web/manifest.json">
+
+  <script type="text/javascript">
+    window.flutterWebRenderer = "html";
+  </script>
+
+  <script type="application/javascript" src="/app_web/assets/packages/flutter_inappwebview_web/assets/web/web_support.js" defer></script>
+</head>
+
+<body>
+  <script src="/app_web/flutter_bootstrap.js" async></script>
+
+  <!-- ✅ ADD THIS SPEECH CODE -->
+  <script>
+    var recognition;
+
+    function startSpeechRecognition() {
+      if (!('webkitSpeechRecognition' in window)) {
+        return "NOT_SUPPORTED";
+      }
+
+      recognition = new webkitSpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = "en-US";
+
+      recognition.onresult = function (event) {
+        const text = event.results[0][0].transcript;
+        window.dispatchEvent(new CustomEvent('speech-result', { detail: text }));
+      };
+
+      recognition.onerror = function (event) {
+        console.log("Speech error:", event.error);
+      };
+
+      recognition.onend = function () {
+        console.log("Speech ended");
+      };
+
+      recognition.start();
+      return "STARTED";
+    }
+
+    function stopSpeechRecognition() {
+      if (recognition) {
+        recognition.stop();
+      }
+    }
+  </script>
+  <!-- ✅ END -->
+
+</body>
+
+</html>

@@ -1,0 +1,176 @@
+
+    /* ===== PAGE ===== */
+    body {
+        background: #ECF6FF;
+        margin: 0;
+        font-family: Inter, system-ui, -apple-system, sans-serif;
+    }
+
+    /* ===== WRAPPER ===== */
+    .dashboard-content {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 24px 16px;
+    }
+
+    /* ===== CARD BASE ===== */
+    .card {
+        background: #D8EDFF;
+        width: 100%;
+        box-sizing: border-box;
+        box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+    }
+
+    /* ===== TOTAL AGENCIES CARD (FIXED) ===== */
+    .stats-card {
+        display: flex !important;
+        flex-direction: row !important;          /* 🔑 force row */
+        align-items: center !important;
+        justify-content: space-between !important;
+
+        width: 100%;
+        padding: 24px 36px;
+        border-radius: 22px;
+        margin-bottom: 24px;
+        box-sizing: border-box;
+    }
+
+    .stats-left {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+
+        flex: 1;                                 /* 🔑 take left space */
+        min-width: 0;
+    }
+
+    .stats-icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: #eef4ff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #3b82f6;
+        font-size: 18px;
+        flex-shrink: 0;
+    }
+
+    .stats-left span {
+        font-size: 20px;
+        font-weight: 600;
+        color:#0C2133;
+        white-space: nowrap;
+    }
+
+    .stats-value {
+        font-size: 20px;
+        font-weight: 600;
+        color:#0C2133;
+
+        flex-shrink: 0;                          /* 🔑 never wrap */
+        margin-left: auto;                       /* 🔑 push right */
+        white-space: nowrap;
+    }
+
+    /* ===== PARTNERS USAGE CARD ===== */
+    .usage-card {
+        padding: 22px 26px;
+        border-radius: 16px;
+    }
+
+    .card-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: #0f172a;
+        margin-bottom: 4px;
+    }
+
+    .card-subtitle {
+        font-size: 13px;
+        color: #64748b;
+        margin-bottom: 16px;
+    }
+
+    .divider {
+        height: 1px;
+        background: #e5efff;
+        margin-bottom: 20px;
+    }
+
+    .filter-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr auto;
+        gap: 20px;
+        align-items: end;
+    }
+
+    label {
+        font-size: 12px;
+        font-weight: 500;
+        color: #475569;
+        margin-bottom: 6px;
+        display: block;
+    }
+
+    select {
+        width: 100%;
+        padding: 10px 12px;
+        font-size: 13px;
+        border-radius: 8px;
+        border: 1px solid #dbeafe;
+        background: #ffffff;
+        color: #334155;
+    }
+
+    .btn-show {
+        background: #0ea5e9;
+        color: #ffffff;
+        border: none;
+        padding: 10px 26px;
+        border-radius: 999px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        height: 42px;
+    }
+
+    /* ===== RESULT ===== */
+    .result-wrapper {
+        display: none;
+        margin-top: 26px;
+    }
+
+    .result-cards {
+        display: flex;
+        justify-content: center;
+        gap: 26px;
+    }
+
+    .result-card {
+        background: #ffffff;
+        border-radius: 14px;
+        padding: 18px 24px;
+        min-width: 180px;
+        text-align: center;
+        box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+    }
+
+    .result-card small {
+        color: #64748b;
+        font-size: 12px;
+    }
+
+    .result-card h2 {
+        margin-top: 8px;
+        font-size: 24px;
+        font-weight: 700;
+    }
+
+    .validity {
+        text-align: center;
+        margin-top: 14px;
+        font-size: 12px;
+        color: #64748b;
+    }

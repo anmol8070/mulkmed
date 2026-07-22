@@ -1,0 +1,536 @@
+/* ===== HEADER ===== */
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.btn-primary {
+    background: #0284c7;
+    color: #fff;
+    border: none;
+    padding: 8px 18px;
+    border-radius: 20px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+/* ===== SEARCH ===== */
+.search-box {
+    margin: 16px 0;
+}
+
+.search-box input {
+    width: 340px;
+    padding: 8px 14px;
+    border-radius: 20px;
+    border: 1px solid #dbeafe;
+}
+
+/* ===== TABS ===== */
+.tabs {
+    margin-bottom: 14px;
+}
+
+.tabs span {
+    margin-right: 20px;
+    font-size: 13px;
+    color: #64748b;
+    cursor: pointer;
+}
+
+.tabs .active {
+    color: #0284c7;
+    font-weight: 600;
+}
+
+/* ===== TABLE ===== */
+table {
+    width: 100%;
+    background: #fff;
+    border-radius: 14px;
+    border-collapse: collapse;
+    overflow: hidden;
+}
+
+th,
+td {
+    padding: 12px;
+    font-size: 13px;
+    border-bottom: 1px solid #e5e7eb;
+    text-align: left;
+}
+
+th {
+    background: #e0f2fe;
+}
+
+.badge {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    background: #e0f2fe;
+}
+
+.link {
+    color: #0284c7;
+    text-decoration: none;
+    font-size: 13px;
+}
+
+/* ================= MODAL ================= */
+
+.agency-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 999;
+}
+
+.agency-modal {
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 860px;
+    background: #fff;
+    border-radius: 14px;
+    z-index: 1000;
+    overflow-y: auto;
+    max-height: 90vh;
+}
+
+/* HEADER */
+.agency-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 20px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.agency-modal-header h3 {
+    font-family: 'Poppins', sans-serif;
+    margin: 0;
+    font-size: 18px;
+    font-weight: 500;
+    font-style: normal;
+    line-height: 100%;
+    letter-spacing: 0;
+    color: #0C2133;
+    vertical-align: middle;
+}
+
+
+.agency-modal-header p {
+    margin: 4px 0 0;
+    font-size: 14px;
+    font-weight: 500;
+    color: #607198;
+}
+
+.close-btn {
+    font-size: 22px;
+    cursor: pointer;
+    color: #64748b;
+}
+
+/* BODY */
+.agency-modal-body {
+    padding: 15px 20px;
+}
+
+.agency-modal-body h4 {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 600;
+    font-size: 16px;
+    color: #0C2133;
+    margin-bottom: 8px;
+    margin-top: 10px;
+}
+
+.agency-modal-body h4:first-of-type {
+    margin-top: 0;
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.form-row {
+    display: flex;
+    gap: 24px;
+    margin-top: 10px;
+}
+
+.form-group {
+    flex: 1;
+}
+
+.agency-modal-body label {
+    display: block;
+    margin-bottom: 4px;
+    font-family: 'Poppins', sans-serif;
+    font-weight: 500;
+    font-size: 14px;
+    color: #0C2133;
+}
+
+.agency-modal-body input,
+.agency-modal-body select,
+.agency-modal-body textarea {
+    width: 100%;
+    padding: 8px 10px;
+    font-size: 14px;
+    border: 1px solid #cfe0ff;
+    border-radius: 8px;
+    outline: none;
+}
+
+.agency-modal-body textarea {
+    height: 60px;
+    resize: none;
+}
+
+.input-wrapper {
+    position: relative;
+}
+
+.input-wrapper input {
+    padding-right: 40px;
+    height: 42px;
+}
+
+
+/* TYPE ROW */
+.type-row {
+    display: flex;
+    gap: 8px;
+}
+
+.add-type-btn {
+    background: #0284c7;
+    color: #fff;
+    border: none;
+    padding: 0 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+/* UPLOAD */
+.upload-box {
+    height: 80px;
+    border: 2px dashed #c7d2fe;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    color: #64748b;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 10px;
+}
+
+.upload-box:hover,
+.upload-box.dragover {
+    background: #eef2ff;
+    border-color: #0284c7;
+}
+
+.upload-box svg {
+    flex-shrink: 0;
+    margin-right: 14px;
+}
+
+#uploadText {
+    font-size: 14px;
+    color: #607198;
+}
+
+/* FOOTER */
+.agency-modal-footer {
+    padding: 12px 20px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    border-top: 1px solid #e5e7eb;
+}
+
+.btn-cancel {
+    background: #f1f5f9;
+    border: none;
+    padding: 8px 18px;
+    border-radius: 20px;
+    cursor: pointer;
+}
+
+/* ================= ADD NEW TYPE MODAL ================= */
+
+.type-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: transparent;
+    z-index: 1100;
+}
+
+.type-modal {
+    display: none;
+    position: fixed;
+    top: 42%;
+    left: 62%;
+    transform: translate(-50%, -50%);
+    width: 280px;
+    background: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    z-index: 1200;
+}
+
+.type-header {
+    padding: 10px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.type-close {
+    cursor: pointer;
+    font-size: 16px;
+    color: #64748b;
+}
+
+.type-body {
+    padding: 12px;
+    display: flex;
+    gap: 8px;
+}
+
+.type-body input {
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 12px;
+    border: 1px solid #dbeafe;
+    border-radius: 6px;
+}
+
+.type-image-upload {
+    padding: 10px 12px 14px;
+}
+
+.type-upload-box {
+    border: 2px dashed #c7d2fe;
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+    font-size: 12px;
+    color: #64748b;
+    cursor: pointer;
+}
+
+.type-upload-box:hover {
+    background: #eef2ff;
+}
+
+.type-footer {
+    padding: 10px 12px 14px;
+    text-align: right;
+    border-top: 1px solid #e5e7eb;
+}
+
+.type-submit-btn {
+    background: #0284c7;
+    color: #fff;
+    border: none;
+    padding: 6px 18px;
+    font-size: 12px;
+    border-radius: 20px;
+    cursor: pointer;
+}
+
+.type-submit-btn:hover {
+    background: #0369a1;
+}
+
+/* PLACEHOLDERS */
+::placeholder {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 400;
+    font-size: 14px;
+    color: #95A6CC;
+}
+
+/* =====================================================
+   RESPONSIVE DESIGN
+===================================================== */
+
+/* ---------- TABLET (<= 1024px) ---------- */
+@media (max-width: 1024px) {
+
+    .agency-modal {
+        width: 92%;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+
+    .form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .form-row {
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .search-box input {
+        width: 260px;
+    }
+}
+
+/* ---------- MOBILE (<= 768px) ---------- */
+@media (max-width: 768px) {
+
+    /* HEADER */
+    .page-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .btn-primary {
+        width: 100%;
+        text-align: center;
+    }
+
+    /* SEARCH */
+    .search-box input {
+        width: 100%;
+    }
+
+    /* TABS */
+    .tabs {
+        display: flex;
+        overflow-x: auto;
+        white-space: nowrap;
+        padding-bottom: 6px;
+    }
+
+    .tabs span {
+        margin-right: 14px;
+        font-size: 12px;
+    }
+
+    /* TABLE → SCROLL */
+    table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+    }
+
+    th,
+    td {
+        font-size: 12px;
+        padding: 10px;
+    }
+
+    /* MODAL FULL SCREEN */
+    .agency-modal {
+        width: 100%;
+        height: 100%;
+        border-radius: 0;
+        top: 0;
+        left: 0;
+        transform: none;
+    }
+
+    .agency-modal-body {
+        padding: 16px;
+    }
+
+    .agency-modal-header h3 {
+        font-size: 20px;
+    }
+
+    .agency-modal-header p {
+        font-size: 13px;
+    }
+
+    /* FORM */
+    .form-grid {
+        grid-template-columns: 1fr;
+        gap: 14px;
+    }
+
+    .form-row {
+        flex-direction: column;
+        gap: 14px;
+    }
+
+    /* TYPE ROW */
+    .type-row {
+        flex-direction: column;
+    }
+
+    .add-type-btn {
+        width: 100%;
+        padding: 8px;
+    }
+
+    /* FOOTER BUTTONS */
+    .agency-modal-footer {
+        flex-direction: column;
+    }
+
+    .btn-cancel,
+    .agency-modal-footer .btn-primary {
+        width: 100%;
+    }
+
+    /* TYPE MODAL */
+    .type-modal {
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: 90%;
+    }
+}
+
+/* ---------- SMALL MOBILE (<= 480px) ---------- */
+@media (max-width: 480px) {
+
+    .agency-modal-header h3 {
+        font-size: 18px;
+    }
+
+    .agency-modal-body h4 {
+        font-size: 15px;
+    }
+
+    .agency-modal-body label {
+        font-size: 13px;
+    }
+
+    .agency-modal-body input,
+    .agency-modal-body select,
+    .agency-modal-body textarea {
+        font-size: 13px;
+    }
+
+    .badge {
+        font-size: 10px;
+        padding: 3px 8px;
+    }
+}

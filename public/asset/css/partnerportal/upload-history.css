@@ -1,0 +1,115 @@
+body {
+    margin: 0;
+    background: #eef6fd;
+    font-family: 'Inter', sans-serif;
+    overflow: hidden;
+}
+
+/* ===== LAYOUT ===== */
+.portal-layout {
+    display: flex;
+    height: 100vh;
+}
+
+.portal-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.portal-content {
+    padding: 60px 60px;
+}
+
+/* ===== CARD ===== */
+.history-card {
+    background: #ffffff;
+    border-radius: 14px;
+    padding: 20px;
+}
+
+/* ===== SEARCH ===== */
+.search-box {
+    position: relative;
+    margin-bottom: 16px;
+}
+
+.search-box input {
+    padding-left: 36px;
+    height: 38px;
+    font-size: 13px;
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.search-box i {
+    position: absolute;
+    top: 50%;
+    left: 12px;
+    transform: translateY(-50%);
+    color: #9ca3af;
+    font-size: 13px;
+}
+
+/* ===== TABLE BASE ===== */
+.table-responsive table {
+    font-size: 12px;
+}
+
+/* ===== TABLE HEADER ===== */
+.table-responsive table thead {
+    background-color: #F4F4F5;
+}
+
+.table-responsive table thead th {
+    font-size: 14px;
+    font-weight: 600;
+    color: #374151;
+    background-color: #F4F4F5;
+}
+
+/* ===== COLUMN-SPECIFIC STYLES ===== */
+/* Date (1st column) – header + body */
+.table-responsive table thead th:nth-child(1),
+.table-responsive table tbody td:nth-child(1) {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* File Name (3rd column) – header */
+.table-responsive table thead th:nth-child(3) {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* File Name (3rd column) – body */
+.table-responsive table tbody td:nth-child(3) {
+    font-size: 14px;
+    font-weight: 400;
+}
+
+/* ===== TABLE BODY ===== */
+.table-responsive table tbody td {
+    color: #374151;
+}
+
+.file-icon {
+    color: #15803d;
+    font-size: 16px;
+    /* normal readable size */
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+
+.view-link {
+    color: #2563eb;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.view-link:hover {
+    text-decoration: underline;
+}

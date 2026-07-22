@@ -1,0 +1,389 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+
+body {
+    font-family: 'Poppins', sans-serif;
+    background-color: #F8FAFC;
+}
+
+.page-title {
+    font-size: 24px;
+    font-weight: 700;
+    color: #0C2133;
+    margin-bottom: 25px;
+    margin-top: 0;
+}
+
+/* Common Header with Back */
+.header-with-back {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 25px;
+}
+
+.back-link-trigger {
+    width: 32px;
+    height: 32px;
+    background: #ffffff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #64748B;
+    text-decoration: none !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.back-link-trigger:hover {
+    background: #f1f5f9;
+    color: #0C2133;
+}
+
+/* ===== CARDS & FILTERS ===== */
+.card {
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 25px;
+    margin-bottom: 25px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+    border: none;
+}
+
+.filter-grid {
+    display: grid;
+    grid-template-columns: 1fr 2fr 1fr auto;
+    gap: 20px;
+    align-items: flex-end;
+}
+
+.input-group-custom {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+label {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #0C2133;
+}
+
+.input-container {
+    position: relative;
+    width: 100%;
+}
+
+select {
+    width: 100%;
+    padding: 12px 15px;
+    padding-right: 40px;
+    font-size: 13px;
+    border: 1.5px solid #E2E8F0;
+    border-radius: 12px;
+    background-color: #fff;
+    color: #64748B;
+    appearance: none;
+    -webkit-appearance: none;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+
+.input-container i {
+    position: absolute;
+    right: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #94A3B8;
+    pointer-events: none;
+    font-size: 14px;
+}
+
+.btn-primary {
+    background: #008cc3;
+    color: #fff;
+    border: none;
+    padding: 12px 35px;
+    border-radius: 25px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+    height: 46px;
+}
+
+/* ===== TABLE STYLING ===== */
+.table-container {
+    background: #ffffff;
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th {
+    background: #EDF6FF;
+    color: #0C2133;
+    font-weight: 700;
+    text-align: left;
+    padding: 18px 25px;
+    font-size: 13px;
+}
+
+td {
+    padding: 18px 25px;
+    font-size: 13px;
+    border-bottom: 1px solid #F1F5F9;
+    color: #475569;
+    vertical-align: middle;
+}
+
+.bold-text {
+    font-weight: 700;
+    color: #0C2133;
+}
+
+/* ===== BADGES & STATUS ===== */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.badge-visa {
+    background: #F1F8FF;
+    color: #008CC3;
+    border: 1px solid #DCEBFF;
+}
+
+.badge-hotel {
+    background: #F5F3FF;
+    color: #6D28D9;
+    border: 1px solid #EDE9FE;
+}
+
+.badge-travel {
+    background: #EFF6FF;
+    color: #2563EB;
+    border: 1px solid #DBEAFE;
+}
+
+.badge-payment {
+    padding: 6px 16px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.badge-prepaid {
+    background: #DCFCE7;
+    color: #166534;
+}
+
+.badge-postpaid {
+    background: #FFEDD5;
+    color: #9A3412;
+}
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.status-pending {
+    color: #F97316;
+}
+
+.status-paid {
+    color: #22C55E;
+}
+
+/* ===== AGENCY PROFILE CARD ===== */
+.agency-profile-card .agency-info {
+    display: flex;
+    gap: 20px;
+}
+
+.agency-image {
+    width: 120px;
+    height: 120px;
+    border-radius: 15px;
+    overflow: hidden;
+}
+
+.agency-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.name-row {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    margin-bottom: 10px;
+}
+
+.agency-id {
+    font-size: 13px;
+    color: #94A3B8;
+}
+
+.agency-address {
+    font-size: 13px;
+    color: #64748B;
+    line-height: 1.5;
+    margin-bottom: 12px;
+}
+
+/* In-Table Download Link */
+.download-invoice-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #008CC3 !important;
+    text-decoration: none !important;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.download-invoice-link i {
+    color: #16A34A;
+    font-size: 24px;
+}
+
+/* ===== RIDER USAGE REFINED ===== */
+.back-link-wrapper {
+    margin-bottom: 20px;
+}
+
+.usage-summary-container {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 40px;
+}
+
+.usage-header-main {
+    display: flex;
+    gap: 150px;
+    align-items: flex-start;
+}
+
+.month-title {
+    font-size: 26px;
+    font-weight: 700;
+    color: #0C2133;
+    margin: 0 0 10px 0;
+}
+
+.status-row {
+    font-size: 14px;
+    font-weight: 600;
+    color: #0C2133;
+    margin: 0;
+}
+
+.status-paid-text {
+    color: #22C55E;
+}
+
+.date-row {
+    font-size: 13px;
+    color: #94A3B8;
+    margin: 6px 0 0 0;
+    font-weight: 500;
+}
+
+.label-light {
+    font-size: 12px;
+    color: #94A3B8;
+    font-weight: 500;
+    display: block;
+}
+
+.price-text {
+    font-size: 15px;
+    font-weight: 700;
+    color: #0C2133;
+    margin: 6px 0 18px 0;
+}
+
+.download-invoice-trigger-excel {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: #008CC3 !important;
+    text-decoration: none !important;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.download-invoice-trigger-excel i {
+    color: #16A34A;
+    font-size: 32px;
+}
+
+.usage-table-wrapper {
+    display: flex;
+    justify-content: center;
+}
+
+.usage-table-container {
+    width: 650px;
+    background: #ffffff;
+    border: 1px solid #E2E8F0;
+    border-radius: 20px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.02);
+}
+
+.usage-table-container th {
+    background: #F0F9FF !important;
+    padding: 22px 30px;
+    border-bottom: 1.5px solid #E2E8F0;
+}
+
+.usage-table-container td {
+    background: #fff;
+    padding: 16px 30px;
+    font-weight: 500;
+    color: #0C2133;
+    border-bottom: 1px solid #F1F5F9;
+}
+
+.usage-table-container tr:last-child td {
+    border-bottom: none;
+}
+
+.text-center {
+    text-align: center;
+}
+
+/* Link Triggers */
+.view-details-link-trigger,
+.view-usage-link-trigger {
+    color: #008CC3;
+    font-weight: 700;
+    text-decoration: none !important;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.view-details-link-trigger:hover,
+.view-usage-link-trigger:hover {
+    text-decoration: underline !important;
+}

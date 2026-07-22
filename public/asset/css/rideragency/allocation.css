@@ -1,0 +1,194 @@
+/* ===== CARD ===== */
+.card {
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+/* ===== FORM GRID ===== */
+.form-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr;
+    gap: 14px;
+
+}
+
+label {
+    margin-bottom: 4px;
+    display: block;
+    color: #000000;
+    font-family: Poppins;
+    font-weight: 500;
+    font-style: Medium;
+    font-size: 16px;
+    text-align: center;
+
+}
+
+input,
+select {
+    width: 100%;
+    padding: 9px 12px;
+    font-size: 13px;
+    border: 1px solid #dbeafe;
+    border-radius: 10px;
+}
+
+.btn-primary {
+    background: #0284c7;
+    color: #fff;
+    border: none;
+    padding: 9px 18px;
+    border-radius: 20px;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    align-self: center;
+}
+
+/* ===== SECTION HEADER ===== */
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    margin-top: 10px;
+}
+
+.section-header h4 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0;
+    color:#0C2133;
+}
+
+.search-box input {
+    width: 260px;
+    padding: 8px 14px;
+    border-radius: 20px;
+    border: 1px solid #dbeafe;
+    font-size: 13px;
+}
+
+/* ===== TABLE ===== */
+table {
+    width: 100%;
+    background: #ffffff;
+    border-radius: 14px;
+    border-collapse: collapse;
+    overflow: hidden;
+}
+
+th,
+td {
+    padding: 12px;
+    font-size: 14px;
+    border-bottom: 1px solid #e5e7eb;
+    text-align: left;
+    color:#000000;
+}
+
+th {
+    background: #e0f2fe;
+    color:#000000;
+    font-family: Poppins;
+    font-weight: 500;
+font-style: Medium;
+font-size: 16px;
+text-align: center;
+
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    background: #e0f2fe;
+    color: #1e3a8a;
+}
+
+.price {
+    font-weight: 600;
+}
+.riders {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 500;          
+    font-style: normal;
+    font-size: 16px;
+
+    color: #000000;
+}
+
+
+.edit {
+    color: #0284c7;
+    font-size: 13px;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+/* FORCE BUTTON TO NEXT LINE */
+.allocate-row {
+    grid-column: 1 / -1;
+    /* full width row */
+    display: flex;
+    justify-content: flex-end;
+    /* right side */
+    margin-top: 6px;
+}
+
+/* ===== INPUT PLACEHOLDER STYLE ===== */
+input::placeholder {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 500;
+    /* Medium */
+    font-size: 14px;
+    line-height: 100%;
+    letter-spacing: 0;
+    color: #95A6CC;
+}
+
+/* Cross-browser support */
+input::-webkit-input-placeholder {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 500;
+    font-size: 14px;
+    color: #95A6CC;
+}
+
+input::-moz-placeholder {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 500;
+    font-size: 14px;
+    color: #95A6CC;
+}
+
+input:-ms-input-placeholder {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 500;
+    font-size: 14px;
+    color: #95A6CC;
+}
+
+/* ===== SELECT & OPTION TEXT ===== */
+select {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 500;
+    /* Medium */
+    font-size: 14px;
+    line-height: 100%;
+    letter-spacing: 0;
+    color: #95A6CC;
+}
+
+/* Dropdown options (limited by browser) */
+select option {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 500;
+    font-size: 14px;
+    color: #0C2133;
+}
