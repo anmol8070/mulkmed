@@ -95,7 +95,7 @@ $(document).ready(function () {
         columnDefs: [
             {
                 orderable: false,
-                targets: [0, 3, 4, 7],
+                targets: [0, 4, 5, 8],
             },
         ],
         ajax: {
@@ -281,6 +281,7 @@ $(document).ready(function () {
         $("#editPlanId").val($(this).attr("rel"));
         $("#editTitle").val($(this).data("title"));
         $("#editSubtitle").val($(this).data("subtitle"));
+        $("#editPrice").val($(this).data("price"));
         $("#editDescription").val($(this).data("description"));
         $("#editStatus").val(String($(this).data("status")));
         $("#editDisplayOrder").val($(this).data("display_order"));
