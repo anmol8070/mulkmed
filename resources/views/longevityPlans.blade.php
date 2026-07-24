@@ -31,6 +31,7 @@
                             <th>{{ __('Image') }}</th>
                             <th>{{ __('Title') }}</th>
                             <th>{{ __('Subtitle') }}</th>
+                            <th>{{ __('Price') }}</th>
                             <th>{{ __("What's Included") }}</th>
                             <th>{{ __('Benefits') }}</th>
                             <th>{{ __('Status') }}</th>
@@ -71,6 +72,12 @@
                             <label>{{ __('Title') }}</label>
                             <input type="text" name="title" class="form-control" required
                                 placeholder="e.g. Mulk Wellness Hub: Dubai (UAE)">
+                        </div>
+
+                        <div class="form-group">
+                            <label>{{ __('Price') }}</label>
+                            <input type="number" step="0.01" name="price" class="form-control" required
+                                placeholder="0.00">
                         </div>
 
                         <div class="form-group">
@@ -155,6 +162,11 @@
                         <div class="form-group">
                             <label>{{ __('Title') }}</label>
                             <input type="text" id="editTitle" name="title" class="form-control" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label>{{ __('Price') }}</label>
+                            <input type="number" step="0.01" id="editPrice" name="price" class="form-control" required>
                         </div>
 
                         <div class="form-group">

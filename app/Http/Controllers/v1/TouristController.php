@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers\V1;
+namespace App\Http\Controllers\v1;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
@@ -78,11 +78,16 @@ class TouristController extends Controller
 
         // DB may contain either:
         // - old format: whole `full_name` stored in `first_name`
-        // - new format: `first_name` = first token, `last_name` = remaining tokens
-        // So we search by both possibilities.
+        // - new format: `first_name` + `last_name` (e.g. "Fathimath Maaya" + "Rahmathullah")
+        // - first token only in `first_name`
         $fullNameNormalized = preg_replace('/[\x{00A0}\x{2007}\x{202F}]+/u', ' ', $fullName);
         $fullNameNormalized = preg_replace('/\s+/u', ' ', trim($fullNameNormalized));
-        $firstNameKey = explode(' ', $fullNameNormalized, 2)[0] ?? $fullNameNormalized;
+        $nameParts = preg_split('/\s+/u', $fullNameNormalized, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $firstNameKey = $nameParts[0] ?? $fullNameNormalized;
+        // When last token is treated as last_name, remaining tokens are first_name
+        $firstNameWithoutLast = count($nameParts) > 1
+            ? implode(' ', array_slice($nameParts, 0, -1))
+            : $fullNameNormalized;
 
         // Contact can be stored either as:
         // - separate: country_code + contact_number
@@ -96,9 +101,14 @@ class TouristController extends Controller
             ? $requestCountryCode . $requestContactNumberDigits
             : $requestContactNumberDigits;
 
-         $tourist = TouristList::where(function ($q) use ($fullNameNormalized, $firstNameKey) {
+         $tourist = TouristList::where(function ($q) use ($fullNameNormalized, $firstNameKey, $firstNameWithoutLast) {
                             $q->where('first_name', $fullNameNormalized)
-                              ->orWhere('first_name', $firstNameKey);
+                              ->orWhere('first_name', $firstNameKey)
+                              ->orWhere('first_name', $firstNameWithoutLast)
+                              ->orWhereRaw(
+                                  "TRIM(CONCAT(COALESCE(first_name, ''), ' ', COALESCE(last_name, ''))) = ?",
+                                  [$fullNameNormalized]
+                              );
                         })
                         ->where(function ($q) use ($requestContactNumberDigits, $contactWithCountry) {
                             // Match either plain or combined phone representation.
@@ -156,9 +166,14 @@ class TouristController extends Controller
     // 🔁 Fallback: find valid booking for today
     $today = $now->toDateString();
 
-    $touristFallback = TouristList::where(function ($q) use ($fullNameNormalized, $firstNameKey) {
+    $touristFallback = TouristList::where(function ($q) use ($fullNameNormalized, $firstNameKey, $firstNameWithoutLast) {
             $q->where('first_name', $fullNameNormalized)
-              ->orWhere('first_name', $firstNameKey);
+              ->orWhere('first_name', $firstNameKey)
+              ->orWhere('first_name', $firstNameWithoutLast)
+              ->orWhereRaw(
+                  "TRIM(CONCAT(COALESCE(first_name, ''), ' ', COALESCE(last_name, ''))) = ?",
+                  [$fullNameNormalized]
+              );
         })
         ->where(function ($q) use ($requestContactNumberDigits, $contactWithCountry) {
             $q->where('contact_number', $requestContactNumberDigits)
@@ -349,7 +364,7 @@ class TouristController extends Controller
             }
         }
 
-        if($request->has('search'))          
+        if($request->has('search'))
         {
             $lang = request()->header('lang', 'en');
 
@@ -476,7 +491,7 @@ class TouristController extends Controller
             'section_type' => 'mulk_ai_dr_midas',
             // 'section_type' => 'mulk_sympton_checker',
             'section_data' => $mulk_ai_dr_midas,
-            'is_disabled' => $dr_midas_is_disabled,
+            'is_disabled' => 0,
         ];
         
         $mulk_ai_wellness_health_check = TravelFlowBanner::select('id', 'tourist_partner_banner')
@@ -490,10 +505,41 @@ class TouristController extends Controller
             'is_disabled' => $wellness_health_check_is_disabled,
         ];
 
+        $is_tourist_login = false;
+        if (isset($tourist)) {
+            $expiry_date = null;
+            if (!empty($tourist->expiry_date)) {
+                $expiry_date = Carbon::parse($tourist->expiry_date);
+            } elseif ($tourist->agent_type == 1 && $tourist->fly_out) {
+                $expiry_date = Carbon::parse($tourist->fly_out)->endOfDay();
+            } elseif ($tourist->agent_type == 2 && $tourist->check_out_time) {
+                $expiry_date = Carbon::parse($tourist->check_out_time)->endOfDay();
+            } elseif ($tourist->agent_type == 3 && $tourist->start_date) {
+                $visa_expiry_days = $tourist->visa_expiry_days;
+                if ($visa_expiry_days == 30) {
+                    $visa_expiry_days = 90;
+                } elseif ($visa_expiry_days == 60) {
+                    $visa_expiry_days = 120;
+                }
+                $expiry_date = Carbon::parse($tourist->start_date)->addDays($visa_expiry_days)->endOfDay();
+            }
+
+            if ($expiry_date) {
+                if (Carbon::now()->gt($expiry_date)) {
+                    $is_tourist_login = false;
+                } else {
+                    $is_tourist_login = true;
+                }
+            } else {
+                $is_tourist_login = true;
+            }
+        }
+
         return response()->json([
             'status' => true,
             'message' => 'data fetched successfully!',
             'sectionSequence' => $sectionSequence,
+            'is_tourist_login' => $is_tourist_login,
             // 'doctors' => $doctors,
             // 'mulk_ai_dr_midas' => $mulk_ai_dr_midas,
             // 'mulk_ai_wellness_health_check' => $mulk_ai_wellness_health_check,
@@ -2554,7 +2600,6 @@ Team Mulk Med";
             'country_id' => 'required_without:country',
             'text' => 'required',
             'pregnancy' => 'nullable',
-            'pregnant' => 'nullable',
         ];
 
         $validator = Validator::make($request->all(), $rules);
@@ -2570,9 +2615,9 @@ Team Mulk Med";
         $region = $this->resolveRegionIdForCountryId($countryId) ?? $request->region;
         $text = $request->text;
         // App contract: 0 = (empty), 1 = Don't know, 2 = Not pregnant, 3 = Pregnant
-        $pregnancyProvided = $this->appPregnancyProvided($request);
+        $pregnancyProvided = $request->exists('pregnancy');
         $pregnancy = $pregnancyProvided
-            ? $this->resolveAppPregnancyInput($request)
+            ? $this->normalizeAppPregnancy($request->pregnancy)
             : '0';
 
         $authorizationKey = env('ISABEL_AUTHORIZATION_KEY');
@@ -2600,7 +2645,7 @@ Team Mulk Med";
         if ($pregnancyProvided) {
             $isabelPregnancy = $this->mapAppPregnancyToIsabel($pregnancy);
             if ($isabelPregnancy !== null) {
-                $rankedPayload['pregnant'] = $isabelPregnancy;
+                $rankedPayload['pregnancy'] = $isabelPregnancy;
             }
         }
 
@@ -2661,9 +2706,7 @@ Team Mulk Med";
                         'diagnoses_sub' => $request->diagnoses_sub,
                         'age_id' => $request->age_id,
                         'sex' => $request->sex,
-                        'pregnant' => $this->appPregnancyProvided($request)
-                            ? $this->mapAppPregnancyToIsabel($this->resolveAppPregnancyInput($request))
-                            : $request->input('pregnant', $request->input('pregnancy')),
+                        'pregnancy' => $request->pregnancy,
                         'region' => $request->region,
                         'text' => $request->text,
                         'specialty_id'=> $request->specialty_id,
@@ -2845,8 +2888,8 @@ Team Mulk Med";
             'country' => 'required_without:country_id',
             'country_id' => 'required_without:country',
             'text' => 'required',
-            'pregnancy' => 'required_without:pregnant|nullable',
-            'pregnant' => 'required_without:pregnancy|nullable',
+            'pregnancy' => 'required_without:pregnant',
+            'pregnant' => 'required_without:pregnancy',
             'Q1' => 'required',
             'Q2' => 'required',
             'Q3' => 'required',
@@ -2875,7 +2918,7 @@ Team Mulk Med";
         $region = $this->resolveRegionIdForCountryId($countryId) ?? $request->region;
         $text = $request->text;
         // App contract: 0 = (empty), 1 = Don't know, 2 = Not pregnant, 3 = Pregnant
-        $pregnancy = $this->resolveAppPregnancyInput($request);
+        $pregnancy = $this->normalizeAppPregnancy($request->input('pregnancy', $request->input('pregnant')));
         $Q1 = $request->Q1;
         $Q2 = $request->Q2;
         $Q3 = $request->Q3;
@@ -2896,7 +2939,7 @@ Team Mulk Med";
                             'suggest'=> 'Suggest+Differential+Diagnosis',
                             'flag'=> 'sortbyRW_advanced',
                             'searchType'=> 0,
-            'language'    => $lang,
+                            'language'    => $lang,
                             'web_service' => 'json',
         ];
 
@@ -2906,7 +2949,7 @@ Team Mulk Med";
 
         $isabelPregnancy = $this->mapAppPregnancyToIsabel($pregnancy);
         if ($isabelPregnancy !== null) {
-            $rankedPayload['pregnant'] = $isabelPregnancy;
+            $rankedPayload['pregnancy'] = $isabelPregnancy;
         }
 
         $ranked_differential_diagnoses = Http::withHeaders([
@@ -2938,7 +2981,7 @@ Team Mulk Med";
             $sex       = $queryParams['sex'] ?? null;
             $region    = $queryParams['region'] ?? null;
             $text      = $queryParams['text'] ?? null;
-            $pregnancy = $queryParams['pregnant'] ?? $queryParams['pregnancy'] ?? null;
+            $pregnancy = $queryParams['pregnancy'] ?? null;
 
             $response = Http::withHeaders([
                             'authorization' => $authorizationKey,
@@ -2948,7 +2991,7 @@ Team Mulk Med";
                             'sex' => $sex,
                             'region' => $region,
                             'text' => $text,
-                            'pregnant' => $pregnancy,
+                            'pregnancy' => $pregnancy,
                             'Q1' => $Q1,
                             'Q2' => $Q2,
                             'Q3' => $Q3,
@@ -2968,7 +3011,7 @@ Team Mulk Med";
                 $isabel_report->region = $request->region;
                 $isabel_report->country = $countryId;
                 $isabel_report->text = $request->text;
-                $isabel_report->pregnancy = $pregnancy;
+                $isabel_report->pregnancy = $request->pregnancy;
                 $isabel_report->Q1 = $request->Q1;
                 $isabel_report->Q2 = $request->Q2;
                 $isabel_report->Q3 = $request->Q3;
@@ -3633,18 +3676,6 @@ Team Mulk Med";
         return null;
     }
 
-    private function appPregnancyProvided(Request $request): bool
-    {
-        return $request->exists('pregnant') || $request->exists('pregnancy');
-    }
-
-    private function resolveAppPregnancyInput(Request $request): string
-    {
-        return $this->normalizeAppPregnancy(
-            $request->input('pregnant', $request->input('pregnancy'))
-        );
-    }
-
     private function normalizeAppPregnancy(mixed $pregnancy): string
     {
         $pregnancy = (string) $pregnancy;
@@ -3707,9 +3738,8 @@ Team Mulk Med";
             return;
         }
 
-        $rankedDiagnoses['diagnoses_checklist']['query_result_details']['pregnant'] =
+        $rankedDiagnoses['diagnoses_checklist']['query_result_details']['pregnancy'] =
             $this->getPregnancyLabel($pregnancy, $lang);
-        unset($rankedDiagnoses['diagnoses_checklist']['query_result_details']['pregnancy']);
         $rankedDiagnoses['diagnoses_checklist']['query_result_details']['region'] =
             $this->resolveCountryNameById($countryId, $lang) ?? (string) $countryId;
         unset($rankedDiagnoses['diagnoses_checklist']['query_result_details']['country']);

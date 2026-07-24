@@ -71,6 +71,7 @@ class LongevityPlanController extends Controller
                 . ' data-image="' . e(!empty($item->image) ? GlobalFunction::createMediaUrl($item->image) : '') . '"'
                 . ' data-status="' . (int) $item->status . '"'
                 . ' data-display_order="' . (int) $item->display_order . '"'
+                . ' data-price="' . e($item->price) . '"'
                 . ' data-whats_included="' . e(json_encode($whatsIncluded)) . '"'
                 . ' data-benefits="' . e(json_encode($benefits)) . '"'
                 . ' rel="' . $item->id . '">' . __('Edit') . '</a>';
@@ -81,6 +82,7 @@ class LongevityPlanController extends Controller
                 $image,
                 e($item->title),
                 e($item->subtitle),
+                e($item->price),
                 count($whatsIncluded) . ' ' . __('Items'),
                 count($benefits) . ' ' . __('Items'),
                 $status,
@@ -110,6 +112,7 @@ class LongevityPlanController extends Controller
         $item->whats_included = $whatsIncluded;
         $item->benefits = $benefits;
         $item->status = (int) $request->status;
+        $item->price = $request->price;
         $item->display_order = (int) ($request->display_order ?? 0);
 
         if ($request->hasFile('image')) {
@@ -135,6 +138,7 @@ class LongevityPlanController extends Controller
         $item->whats_included = $this->normalizeList($request->input('whats_included', []));
         $item->benefits = $this->normalizeList($request->input('benefits', []));
         $item->status = (int) $request->status;
+        $item->price = $request->price;
         $item->display_order = (int) ($request->display_order ?? 0);
 
         if ($request->hasFile('image')) {

@@ -200,6 +200,7 @@ $triggerId = 1;
                     'title' => $item->title,
                     'subtitle' => $item->subtitle,
                     'description' => $item->description,
+                    'price' => number_format((float) $item->price, 2, '.', ''),
                     'image' => !empty($item->image) ? ltrim($item->image, '/') : null,
                     'whats_included' => $whatsIncluded,
                     'benefits' => $benefits,

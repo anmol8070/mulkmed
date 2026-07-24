@@ -20,6 +20,7 @@ class LongevityPlan extends Model
         'benefits',
         'status',
         'display_order',
+        'price',
     ];
 
     protected $casts = [
@@ -27,5 +28,6 @@ class LongevityPlan extends Model
         'benefits' => 'array',
         'status' => 'integer',
         'display_order' => 'integer',
+        'price' => 'decimal:2',
     ];
 }
