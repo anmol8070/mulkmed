@@ -2615,9 +2615,9 @@ Team Mulk Med";
         $region = $this->resolveRegionIdForCountryId($countryId) ?? $request->region;
         $text = $request->text;
         // App contract: 0 = (empty), 1 = Don't know, 2 = Not pregnant, 3 = Pregnant
-        $pregnancyProvided = $request->exists('pregnancy');
+        $pregnancyProvided = $request->has('pregnancy') || $request->has('pregnant');
         $pregnancy = $pregnancyProvided
-            ? $this->normalizeAppPregnancy($request->pregnancy)
+            ? $this->normalizeAppPregnancy($request->input('pregnancy', $request->input('pregnant')))
             : '0';
 
         $authorizationKey = env('ISABEL_AUTHORIZATION_KEY');
@@ -3738,8 +3738,9 @@ Team Mulk Med";
             return;
         }
 
-        $rankedDiagnoses['diagnoses_checklist']['query_result_details']['pregnancy'] =
+        $rankedDiagnoses['diagnoses_checklist']['query_result_details']['pregnant'] =
             $this->getPregnancyLabel($pregnancy, $lang);
+        unset($rankedDiagnoses['diagnoses_checklist']['query_result_details']['pregnancy']);
         $rankedDiagnoses['diagnoses_checklist']['query_result_details']['region'] =
             $this->resolveCountryNameById($countryId, $lang) ?? (string) $countryId;
         unset($rankedDiagnoses['diagnoses_checklist']['query_result_details']['country']);

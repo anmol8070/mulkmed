@@ -334,7 +334,6 @@ use App\Http\Controllers\v1\PatientEmrReportController;
         Route::post('analyzeReport', [MajorOrganTestController::class, 'analyzeReport'])->middleware('checkHeader')->name('analyzeReport');
         Route::post('saveSelection', [MajorOrganTestController::class, 'saveSelection'])->middleware('checkHeader')->name('saveSelection');
         Route::get('getSelection', [MajorOrganTestController::class, 'getSelection'])->middleware('checkHeader')->name('getSelection');
-      
  
   
     });
@@ -459,20 +458,31 @@ use App\Http\Controllers\v1\PatientEmrReportController;
     //  download certificate
     Route::get('/download-certificate', [TravelerController::class, 'downloadCertificate']);
 
+    //  // New Shenai Care routes
+    // Route::prefix('newshenai-care')->group(function () {
+    //     Route::post('login', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'login']);
+    //     Route::post('scan', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'scan']);
+    //     Route::post('store', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'scan']);
+    //     Route::post('trigger-classification', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'triggerClassification']);
+    //     Route::get('latest-longevity-report', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'getLatestLongevityReport']);
+    //     Route::post('latest-longevity-report', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'getLatestLongevityReport']);
+    //     Route::get('latestLongevityReport', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'getLatestLongevityReport']);
+    //     Route::post('latestLongevityReport', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'getLatestLongevityReport']);
+    //     Route::get('vitals/{id?}', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'getVital']);
+    //     Route::get('longevityReportPdf', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'longevityReportPdf'])->name('newshenai.longevityReportPdf');
+    //     Route::get('downloadLatestLongevityReportPdf', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'downloadLatestLongevityReportPdf']);
+    //     Route::post('uploadLabReport', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'uploadLabReport']);
+    //     Route::get('reviewAndBuy', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'reviewAndBuy']);
+    //     });
+
      // New Shenai Care routes
     Route::prefix('newshenai-care')->group(function () {
         Route::post('login', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'login']);
         Route::post('scan', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'scan']);
-        Route::post('store', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'scan']);
         Route::post('trigger-classification', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'triggerClassification']);
-        Route::get('latest-longevity-report', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'getLatestLongevityReport']);
-        Route::post('latest-longevity-report', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'getLatestLongevityReport']);
         Route::get('latestLongevityReport', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'getLatestLongevityReport']);
-        Route::post('latestLongevityReport', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'getLatestLongevityReport']);
         Route::get('vitals/{id?}', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'getVital']);
         Route::get('longevityReportPdf', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'longevityReportPdf'])->name('newshenai.longevityReportPdf');
         Route::get('downloadLatestLongevityReportPdf', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'downloadLatestLongevityReportPdf']);
-        Route::post('uploadLabReport', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'uploadLabReport']);
-        Route::get('reviewAndBuy', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'reviewAndBuy']);
-        });
+    });
          

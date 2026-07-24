@@ -11,23 +11,25 @@ use App\Models\MajorOrganUserSelection;
 use App\Services\LabReportBiomarkerAnalyzerService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use App\Helpers\CurrencyHelper;
 
 class MajorOrganTestController extends Controller
 {
-    public function list()
+    public function list(Request $request)
     {
+        $currency = CurrencyHelper::getUserCurrency();
         $tests = MajorOrganTest::where('status', 1)
             ->orderBy('display_order', 'asc')
             ->orderBy('id', 'asc')
             ->get()
-            ->map(function ($item) {
+            ->map(function ($item) use ($currency) {
                 $biomarkers = is_array($item->biomarkers) ? $item->biomarkers : [];
 
                 return [
                     'id' => $item->id,
                     'name' => $item->name,
                     'icon' => !empty($item->icon) ? ltrim($item->icon, '/') : null,
-                    'price' => number_format((float) $item->price, 2, '.', ''),
+                    'price' => number_format((float) CurrencyHelper::convert($item->price, $currency), 2, '.', ''),
                     'biomarker_count' => count($biomarkers),
                     'biomarkers' => $biomarkers,
                 ];
@@ -120,11 +122,14 @@ class MajorOrganTestController extends Controller
 
             $analysis['lab_report_id'] = $labReport->id;
             $analysis['user_id'] = (int) $request->user_id;
+            
+            $currency = CurrencyHelper::getUserCurrency();
+            $analysis['to_pay'] = CurrencyHelper::convert((float) ($analysis['to_pay'] ?? 0), $currency);
 
             return response()->json([
                 'status' => true,
                 'message' => 'AI analysis completed successfully',
-                'currency' => 'AED',
+                'currency' => $currency,
                 'data' => $analysis,
             ]);
         } catch (\Throwable $e) {
@@ -136,8 +141,9 @@ class MajorOrganTestController extends Controller
         }
     }
 
-    public function package()
+    public function package(Request $request)
     {
+        $currency = CurrencyHelper::getUserCurrency();
         $package = MajorOrganPackage::where('status', 1)->first();
 
         if (!$package) {
@@ -156,15 +162,16 @@ class MajorOrganTestController extends Controller
                 'title' => $package->title,
                 'badge' => $package->badge,
                 'description' => $package->description,
-                'price' => number_format((float) $package->price, 2, '.', ''),
+                'price' => number_format((float) CurrencyHelper::convert($package->price, $currency), 2, '.', ''),
                 'image' => !empty($package->image) ? GlobalFunction::createMediaUrl($package->image) : null,
                 'status' => (int) $package->status,
             ],
         ]);
     }
 
-    public function planDetails()
+    public function planDetails(Request $request)
     {
+        $currency = CurrencyHelper::getUserCurrency();
         $package = MajorOrganPackage::where('status', 1)->first();
 
         if (!$package) {
@@ -203,7 +210,7 @@ class MajorOrganTestController extends Controller
                 'title' => $package->title,
                 'badge' => $package->badge,
                 'description' => $package->description,
-                'price' => number_format((float) $package->price, 2, '.', ''),
+                'price' => number_format((float) CurrencyHelper::convert($package->price, $currency), 2, '.', ''),
                 'image' => !empty($package->image)
                     ? ltrim($package->image, '/')
                     : null,
@@ -340,7 +347,7 @@ class MajorOrganTestController extends Controller
         return response()->json([
             'status' => true,
             'message' => 'Selection saved successfully',
-            'currency' => 'AED',
+            'currency' => CurrencyHelper::getUserCurrency(),
             'data' => $this->formatSelection($selection),
         ]);
     }
@@ -377,13 +384,14 @@ class MajorOrganTestController extends Controller
         return response()->json([
             'status' => true,
             'message' => 'Selection fetched successfully',
-            'currency' => 'AED',
+            'currency' => CurrencyHelper::getUserCurrency(),
             'data' => $this->formatSelection($selection),
         ]);
     }
 
     protected function formatSelection(MajorOrganUserSelection $selection): array
     {
+        $currency = CurrencyHelper::getUserCurrency();
         $data = [
             'id' => $selection->id,
             'user_id' => (int) $selection->user_id,
@@ -391,7 +399,7 @@ class MajorOrganTestController extends Controller
             'organ_health_check_count' => (int) $selection->organ_health_check_count,
             'total_biomarkers' => (int) $selection->total_biomarkers,
             'summary' => $selection->organ_health_check_count . ' Organ Health Check • ' . $selection->total_biomarkers . ' Biomarkers',
-            'total_amount' => number_format((float) $selection->total_amount, 2, '.', ''),
+            'total_amount' => number_format((float) CurrencyHelper::convert($selection->total_amount, $currency), 2, '.', ''),
             'status' => (int) $selection->status,
         ];
 
@@ -401,7 +409,7 @@ class MajorOrganTestController extends Controller
                 'id' => $selection->package_id,
                 'title' => $selection->package_title,
                 'badge' => $selection->package_badge,
-                'price' => number_format((float) $selection->package_price, 2, '.', ''),
+                'price' => number_format((float) CurrencyHelper::convert($selection->package_price, $currency), 2, '.', ''),
                 'selected' => true,
                 'organ_health_check_count' => (int) $selection->organ_health_check_count,
                 'total_biomarkers' => (int) $selection->total_biomarkers,

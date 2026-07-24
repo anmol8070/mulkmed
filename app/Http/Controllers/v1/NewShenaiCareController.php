@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Database\Schema\Blueprint;
 use PDF;
+use App\Helpers\CurrencyHelper;
 
 class NewShenaiCareController extends Controller
 {
@@ -46,6 +47,7 @@ class NewShenaiCareController extends Controller
                 'message' => 'user_id query parameter is required.',
             ], 400);
         }
+        $currency = CurrencyHelper::getUserCurrency();
 
         $vital = AI_Vital::where('user_id', $userId)
             ->where('is_longevity', 1)
@@ -156,13 +158,13 @@ $triggerId = 1;
             ->orderBy('display_order', 'asc')
             ->orderBy('id', 'asc')
             ->get()
-            ->map(function ($item) {
+            ->map(function ($item) use ($currency) {
                 $biomarkers = is_array($item->biomarkers) ? $item->biomarkers : [];
                 return [
                     'id' => $item->id,
                     'name' => $item->name,
                     'icon' => !empty($item->icon) ? ltrim($item->icon, '/') : null,
-                    'price' => number_format((float) $item->price, 2, '.', ''),
+                    'price' => number_format((float) CurrencyHelper::convert($item->price, $currency), 2, '.', ''),
                     'biomarker_count' => count($biomarkers),
                     'biomarkers' => $biomarkers,
                 ];
@@ -177,7 +179,7 @@ $triggerId = 1;
                 'title' => $package->title,
                 'badge' => $package->badge,
                 'description' => $package->description,
-                'price' => number_format((float) $package->price, 2, '.', ''),
+                'price' => number_format((float) CurrencyHelper::convert($package->price, $currency), 2, '.', ''),
                 'image' => !empty($package->image) ? ltrim($package->image, '/') : null,
                 'status' => (int) $package->status,
                 'organ_health_check_count' => $majorOrganTests->count(),
@@ -191,7 +193,7 @@ $triggerId = 1;
             ->orderBy('display_order', 'asc')
             ->orderBy('id', 'asc')
             ->get()
-            ->map(function ($item) {
+            ->map(function ($item) use ($currency) {
                 $whatsIncluded = is_array($item->whats_included) ? $item->whats_included : [];
                 $benefits = is_array($item->benefits) ? $item->benefits : [];
 
@@ -200,7 +202,7 @@ $triggerId = 1;
                     'title' => $item->title,
                     'subtitle' => $item->subtitle,
                     'description' => $item->description,
-                    'price' => number_format((float) $item->price, 2, '.', ''),
+                    'price' => number_format((float) CurrencyHelper::convert($item->price, $currency), 2, '.', ''),
                     'image' => !empty($item->image) ? ltrim($item->image, '/') : null,
                     'whats_included' => $whatsIncluded,
                     'benefits' => $benefits,

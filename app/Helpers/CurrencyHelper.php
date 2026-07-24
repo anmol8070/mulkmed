@@ -33,6 +33,21 @@ class CurrencyHelper
         return round($amount * $rates[$to], 2);
     }
 
+    public static function getUserCurrency(): string
+    {
+        $currency = request()->input('currency');
+        if ($currency) {
+            return strtoupper($currency);
+        }
+
+        $host = request()->getHost();
+        if (str_contains($host, 'indiamulkmed') || str_contains($host, 'india.mulkmed')) {
+            return 'INR';
+        }
+
+        return 'AED';
+    }
+
     public static function currencies(string $base = 'AED'): array
     {
         $rates = self::rates($base);
