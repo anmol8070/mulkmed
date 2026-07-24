@@ -127,6 +127,8 @@ final class Constants
     const AIVitalScanPaymentType = 'ai_vital_scan_payment';
 
     const AIVitalScanPaymentBeforeType = 'ai_vital_scan_before_payment';
+
+    const LongevityPaymentType = 'longevity_payment';
     
 
     // marchant payment type 
@@ -140,6 +142,8 @@ final class Constants
     const CCAvenueAIVitalScanBeforePaymentType = 'aivitalscanbeforepayment';
 
     const CCAvenueMesaBeforeChatPayment = 'mesabeforechatpayment';
+
+    const CCAvenueLongevityPaymentType = 'longevitypayment';
 
     const meetingDurationInMinutes = 60;
  

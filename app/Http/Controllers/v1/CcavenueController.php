@@ -32,6 +32,7 @@ use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class CcavenueController extends Controller
 {
@@ -1141,7 +1142,7 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
             ]);
         }
 
-        else if(($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanBeforePaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMesaBeforeChatPayment)){
+        else if(($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanBeforePaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMesaBeforeChatPayment) || ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType)){
             $ai_vital_misa = AIVitalScanMisa::where('order_id', $responseData['order_id'])->first();
             if($ai_vital_misa){
                 if($status == 'Success'){
@@ -1243,6 +1244,147 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
         catch (\Throwable $e) {
             // Log unexpected errors
             Log::error('Error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return ['status' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    function initiatePaymentLongevity(Request $request)
+    {
+        try {
+            $rules = [
+                'user_id' => 'required',
+                'doctor_id' => 'nullable',
+                'problem' => 'nullable',
+                'date' => 'nullable',
+                'time' => 'nullable',
+                'type' => 'nullable',
+                'order_summary' => 'nullable',
+                'is_coupon_applied' => 'nullable|in:0,1',
+                'coupon_title' => 'nullable',
+                'coupon_id' => 'nullable',
+                'service_amount' => 'nullable|numeric',
+                'discount_amount' => 'nullable|numeric',
+                'subtotal' => 'nullable|numeric',
+                'total_tax_amount' => 'nullable|numeric',
+                'payable_amount' => 'nullable|numeric|min:1',
+                'amount' => 'nullable|numeric|min:1',
+                'is_utc_timezone' => 'nullable',
+                'plan_id' => 'nullable',
+                'report_from' => 'nullable|string',
+            ];
+
+            $validator = Validator::make($request->all(), $rules);
+            if ($validator->fails()) {
+                $messages = $validator->errors()->all();
+                $msg = $messages[0];
+                return response()->json(['status' => false, 'message' => $msg]);
+            }
+
+            $user = Users::find($request->user_id);
+            if ($user == null) {
+                return response()->json(['status' => false, 'message' => "User doesn't exists!"]);
+            }
+
+            $order_id = 'ccavenue_' . uniqid();
+
+            // Amount: if payable_amount / amount / order_summary.payable_amount is passed → use it
+            // otherwise default to AED 5
+            $orderSummary = $request->order_summary;
+            if (is_string($orderSummary)) {
+                $orderSummary = json_decode($orderSummary, true);
+            }
+            $orderSummaryPayable = is_array($orderSummary) ? ($orderSummary['payable_amount'] ?? null) : null;
+
+            if ($request->filled('payable_amount') && is_numeric($request->payable_amount) && (float) $request->payable_amount > 0) {
+                $amount = (float) $request->payable_amount;
+            } elseif ($request->filled('amount') && is_numeric($request->amount) && (float) $request->amount > 0) {
+                $amount = (float) $request->amount;
+            } elseif (!empty($orderSummaryPayable) && is_numeric($orderSummaryPayable) && (float) $orderSummaryPayable > 0) {
+                $amount = (float) $orderSummaryPayable;
+            } else {
+                $amount = 5;
+            }
+
+            Log::info('Longevity payment amount resolved', [
+                'user_id' => $request->user_id,
+                'payable_amount' => $request->payable_amount,
+                'amount' => $request->amount,
+                'order_summary_payable' => $orderSummaryPayable,
+                'final_amount' => $amount,
+            ]);
+
+            $ai_vital_misa = new AIVitalScanMisa();
+            $ai_vital_misa->user_id = $request->user_id;
+            $ai_vital_misa->order_id = $order_id;
+            $ai_vital_misa->report_from = $request->report_from ?? 'longevity';
+            $ai_vital_misa->payment_status = 0;
+            $ai_vital_misa->payment_amount = $amount;
+            $ai_vital_misa->payment_type = Constants::CCAvenueLongevityPaymentType;
+            $ai_vital_misa->scan_date = $request->date;
+
+            // Persist full checkout payload fields when columns exist
+            $extraFields = [
+                'plan_id' => $request->plan_id,
+                'doctor_id' => $request->doctor_id,
+                'problem' => $request->problem,
+                'time' => $request->time,
+                'type' => $request->type,
+                'is_coupon_applied' => $request->is_coupon_applied,
+                'coupon_title' => $request->coupon_title,
+                'coupon_id' => $request->coupon_id,
+                'service_amount' => $request->service_amount,
+                'discount_amount' => $request->discount_amount,
+                'subtotal' => $request->subtotal,
+                'total_tax_amount' => $request->total_tax_amount,
+                'payable_amount' => $amount,
+                'is_utc_timezone' => $request->is_utc_timezone,
+                'order_summary' => is_array($orderSummary) ? json_encode($orderSummary) : $request->order_summary,
+            ];
+
+            foreach ($extraFields as $column => $value) {
+                if ($value !== null && Schema::hasColumn('ai_vital_scan_misa', $column)) {
+                    $ai_vital_misa->$column = $value;
+                }
+            }
+
+            $ai_vital_misa->save();
+
+            $baseUrl = request()->getSchemeAndHttpHost();
+            $redirectUrl = $baseUrl . '/api/v1/payment-response';
+            $cancelUrl   = $baseUrl . '/api/v1/payment-cancel';
+
+            $data = [
+                "merchant_id" => env('CCAVENUE_MERCHANT_ID'),
+                "order_id" => $order_id,
+                "currency" => "AED",
+                "amount" => $amount,
+                "merchant_param5" => Constants::CCAvenueLongevityPaymentType,
+                "redirect_url" => $redirectUrl,
+                "cancel_url" => $cancelUrl,
+                "language" => "EN",
+            ];
+
+            $merchant_data = "";
+            foreach ($data as $key => $value) {
+                $merchant_data .= $key . '=' . $value . '&';
+            }
+
+            $encrypted_data = Crypto::encrypt($merchant_data, env('CCAVENUE_WORKING_KEY'));
+
+            $payment_url = env('CCAVENUE_BASE_URL') . "=$encrypted_data&access_code=" . env('CCAVENUE_ACCESS_CODE');
+
+            return response()->json([
+                'status' => true,
+                'payment_url' => $payment_url,
+                'order_id' => $order_id,
+                'amount' => $amount,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Error initiating longevity payment', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
@@ -1861,7 +2003,7 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                 ]);
             }
 
-            else if(($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanBeforePaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMesaBeforeChatPayment)){
+            else if(($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanBeforePaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMesaBeforeChatPayment) || ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType)){
                 $ai_vital_misa = AIVitalScanMisa::where('order_id', $responseData['order_id'])->first();
                 if($ai_vital_misa){
                     if($status == 'Success'){
@@ -1894,6 +2036,13 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
             }
 
             $appointment = Appointments::where('order_id', $order_id)->first();
+
+            if (!$appointment) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Order not found!',
+                ]);
+            }
 
             if($appointment->payment_status != Constants::appointmentPaymentPendingStatus){
                  return response()->json([
@@ -2182,7 +2331,7 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
             ]);
             }
 
-            else if(($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanPaymentType) || ($responseData['merchant_param5'] == Constants::AIVitalScanPaymentBeforeType)){
+            else if(($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanPaymentType) || ($responseData['merchant_param5'] == Constants::AIVitalScanPaymentBeforeType) || ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMesaBeforeChatPayment) || ($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanBeforePaymentType)){
                 $ai_vital_misa = AIVitalScanMisa::where('order_id', $responseData['order_id'])->first();
                 if($ai_vital_misa){
                    
@@ -2206,6 +2355,13 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
             }
 
             $appointment = Appointments::where('order_id', $order_id)->first();
+
+            if (!$appointment) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Order not found!',
+                ]);
+            }
 
             if($appointment->payment_status != Constants::appointmentPaymentPendingStatus){
                  return response()->json([
