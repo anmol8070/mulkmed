@@ -733,6 +733,24 @@
                                     {{ __('Banners') }} </span></a>
                         </li> -->
                         {{-- @endif --}}
+                        @if ($section('mulk_longevity'))
+                        <li class="dropdown sideBarli menu-mulk-longevity {{ request()->routeIs('majorOrganTests.index', 'longevityPlans.index') ? 'active' : '' }}">
+                            <a href="#" class="nav-link has-dropdown"><i class="fas fa-heartbeat"></i><span>{{ __('Mulk Longevity') }}</span></a>
+                            <ul class="dropdown-menu">
+                                @if ($can('mulk_longevity.major_organ_tests'))
+                                <li class="majorOrganTestsSideA {{ request()->routeIs('majorOrganTests.index') ? 'active' : '' }}">
+                                    <a href="{{ route('majorOrganTests.index') }}" class="nav-link"><i class="fas fa-heartbeat"></i> {{ __('Major Organ Tests') }}</a>
+                                </li>
+                                @endif
+                                @if ($can('mulk_longevity.longevity_plans'))
+                                <li class="longevityPlansSideA {{ request()->routeIs('longevityPlans.index') ? 'active' : '' }}">
+                                    <a href="{{ route('longevityPlans.index') }}" class="nav-link"><i class="fas fa-spa"></i> {{ __('Longevity Plans') }}</a>
+                                </li>
+                                @endif
+                            </ul>
+                        </li>
+                        @endif
+
                         @if ($section('online_consultation'))
                         <li class="dropdown sideBarli menu-online-consultation {{ request()->routeIs('commonHealthProblems', 'SpecialityWiseDisease', 'doctorPlans', 'banners') ? 'active' : '' }}">
                             <a href="#" class="nav-link has-dropdown"><i class="fas fa-stethoscope"></i><span>{{ __('Online Consultation') }}</span></a>
@@ -776,6 +794,8 @@
                         @endif
 
 
+
+
                         {{-- @endif --}}
 
                         @if ($section('other_data'))
@@ -805,16 +825,6 @@
                                 @if ($can('other_data.test_classification'))
                                 <li class="testClassificationSideA {{ request()->routeIs('testClassification') ? 'active' : '' }}">
                                     <a href="{{ route('testClassification') }}" class="nav-link"><i class="fas fa-brain"></i> {{ __('Test Classification') }}</a>
-                                </li>
-                                @endif
-                                @if ($can('other_data.major_organ_tests'))
-                                <li class="majorOrganTestsSideA {{ request()->routeIs('majorOrganTests.index') ? 'active' : '' }}">
-                                    <a href="{{ route('majorOrganTests.index') }}" class="nav-link"><i class="fas fa-heartbeat"></i> {{ __('Major Organ Tests') }}</a>
-                                </li>
-                                @endif
-                                @if ($can('other_data.longevity_plans'))
-                                <li class="longevityPlansSideA {{ request()->routeIs('longevityPlans.index') ? 'active' : '' }}">
-                                    <a href="{{ route('longevityPlans.index') }}" class="nav-link"><i class="fas fa-spa"></i> {{ __('Longevity Plans') }}</a>
                                 </li>
                                 @endif
                                 @if ($can('other_data.homepage_sections'))

@@ -91,11 +91,11 @@ $(document).ready(function () {
         processing: true,
         serverSide: true,
         serverMethod: "POST",
-        aaSorting: [[6, "asc"]],
+        aaSorting: [[8, "asc"]],
         columnDefs: [
             {
                 orderable: false,
-                targets: [0, 4, 5, 8],
+                targets: [0, 5, 6, 9],
             },
         ],
         ajax: {
@@ -282,6 +282,7 @@ $(document).ready(function () {
         $("#editTitle").val($(this).data("title"));
         $("#editSubtitle").val($(this).data("subtitle"));
         $("#editPrice").val($(this).data("price"));
+        $("#editPlanExpiryDays").val($(this).data("plan_expiry_days"));
         $("#editDescription").val($(this).data("description"));
         $("#editStatus").val(String($(this).data("status")));
         $("#editDisplayOrder").val($(this).data("display_order"));

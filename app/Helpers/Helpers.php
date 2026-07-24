@@ -160,6 +160,13 @@ class Helpers
                     'order_medicine.categories' => 'Categories',
                 ],
             ],
+            'mulk_longevity' => [
+                'label' => 'Mulk Longevity',
+                'children' => [
+                    'mulk_longevity.major_organ_tests' => 'Major Organ Tests',
+                    'mulk_longevity.longevity_plans' => 'Longevity Plans',
+                ],
+            ],
             'other_data' => [
                 'label' => 'Other Data',
                 'children' => [
@@ -168,8 +175,6 @@ class Helpers
                     'other_data.admin_management' => 'Admin Management',
                     'other_data.emr_master_data' => 'EMR Master Data',
                     'other_data.test_classification' => 'Test Classification',
-                    'other_data.major_organ_tests' => 'Major Organ Tests',
-                    'other_data.longevity_plans' => 'Longevity Plans',
                     'other_data.homepage_sections' => 'Homepage Sections',
                     'other_data.bulk_upload_doctors' => 'Bulk Upload of Doctors',
                     'other_data.bulk_upload_doctor_slots' => 'Bulk Upload Doctors Slots',

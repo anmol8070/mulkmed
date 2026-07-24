@@ -32,6 +32,7 @@
                             <th>{{ __('Title') }}</th>
                             <th>{{ __('Subtitle') }}</th>
                             <th>{{ __('Price') }}</th>
+                            <th>{{ __('Expiry in Days') }}</th>
                             <th>{{ __("What's Included") }}</th>
                             <th>{{ __('Benefits') }}</th>
                             <th>{{ __('Status') }}</th>
@@ -78,6 +79,12 @@
                             <label>{{ __('Price') }}</label>
                             <input type="number" step="0.01" name="price" class="form-control" required
                                 placeholder="0.00">
+                        </div>
+
+                        <div class="form-group">
+                            <label>{{ __('Plan Expiry in Days (Leave blank for no expiry)') }}</label>
+                            <input type="number" name="plan_expiry_days" class="form-control"
+                                placeholder="e.g. 365">
                         </div>
 
                         <div class="form-group">
@@ -167,6 +174,12 @@
                         <div class="form-group">
                             <label>{{ __('Price') }}</label>
                             <input type="number" step="0.01" id="editPrice" name="price" class="form-control" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label>{{ __('Plan Expiry in Days (Leave blank for no expiry)') }}</label>
+                            <input type="number" id="editPlanExpiryDays" name="plan_expiry_days" class="form-control"
+                                placeholder="e.g. 365">
                         </div>
 
                         <div class="form-group">

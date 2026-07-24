@@ -18,9 +18,12 @@ use App\Models\Coupons;
 use App\Models\UserPlan;
 use App\Models\JitsiMeeting;
 use App\Models\HnHCards;
+use App\Helpers\CurrencyHelper;
 use App\Models\AIVitalScanMisa;
 use App\Models\BestOfferPlanOrders;
 use App\Models\UserCoupons;
+use App\Models\UserLongevityPlan;
+use App\Models\LongevityPlan;
 use Illuminate\Http\Request;
 use App\Helpers\EmailHelpers;
 use Illuminate\Support\Facades\Validator;
@@ -1149,6 +1152,25 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                     $ai_vital_misa->payment_status = Constants::AIVitalsPaymentSuccessStatus;
                     $ai_vital_misa->payment_type = $responseData['merchant_param5'];
                     $ai_vital_misa->save();
+
+                    // If it's a longevity plan purchase and plan_id is valid
+                    if ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType && $ai_vital_misa->plan_id) {
+                        $longevityPlan = LongevityPlan::find($ai_vital_misa->plan_id);
+                        if ($longevityPlan) {
+                            $expiryDate = null;
+                            if (!empty($longevityPlan->plan_expiry_days)) {
+                                $expiryDate = \Carbon\Carbon::now()->addDays((int)$longevityPlan->plan_expiry_days)->format('Y-m-d');
+                            }
+                            UserLongevityPlan::create([
+                                'user_id' => $ai_vital_misa->user_id,
+                                'plan_id' => $ai_vital_misa->plan_id,
+                                'order_id' => $responseData['order_id'],
+                                'amount' => $responseData['amount'],
+                                'status' => 'active',
+                                'expiry_date' => $expiryDate,
+                            ]);
+                        }
+                    }
                 }
 
                 else if($status == 'Failure'){
@@ -1270,8 +1292,8 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                 'discount_amount' => 'nullable|numeric',
                 'subtotal' => 'nullable|numeric',
                 'total_tax_amount' => 'nullable|numeric',
-                'payable_amount' => 'nullable|numeric|min:1',
-                'amount' => 'nullable|numeric|min:1',
+                'payable_amount' => 'nullable|numeric|min:0',
+                'amount' => 'nullable|numeric|min:0',
                 'is_utc_timezone' => 'nullable',
                 'plan_id' => 'nullable',
                 'report_from' => 'nullable|string',
@@ -1290,6 +1312,7 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
             }
 
             $order_id = 'ccavenue_' . uniqid();
+            $currency = CurrencyHelper::getUserCurrency();
 
             // Amount: if payable_amount / amount / order_summary.payable_amount is passed → use it
             // otherwise default to AED 5
@@ -1306,7 +1329,7 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
             } elseif (!empty($orderSummaryPayable) && is_numeric($orderSummaryPayable) && (float) $orderSummaryPayable > 0) {
                 $amount = (float) $orderSummaryPayable;
             } else {
-                $amount = 5;
+                $amount = CurrencyHelper::convert(5, $currency);
             }
 
             Log::info('Longevity payment amount resolved', [
@@ -1357,11 +1380,14 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
             $redirectUrl = $baseUrl . '/api/v1/payment-response';
             $cancelUrl   = $baseUrl . '/api/v1/payment-cancel';
 
+
+
             $data = [
                 "merchant_id" => env('CCAVENUE_MERCHANT_ID'),
                 "order_id" => $order_id,
-                "currency" => "AED",
-                "amount" => $amount,
+                "currency" => $currency,
+                "amount" => number_format($amount, 2, '.', ''),
+                "merchant_param4" => $request->plan_id,
                 "merchant_param5" => Constants::CCAvenueLongevityPaymentType,
                 "redirect_url" => $redirectUrl,
                 "cancel_url" => $cancelUrl,
@@ -1382,6 +1408,7 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                 'payment_url' => $payment_url,
                 'order_id' => $order_id,
                 'amount' => $amount,
+                'currency' => $currency,
             ]);
         } catch (\Throwable $e) {
             Log::error('Error initiating longevity payment', [
@@ -2010,6 +2037,39 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                         $ai_vital_misa->payment_status = Constants::AIVitalsPaymentSuccessStatus;
                         $ai_vital_misa->payment_type = $responseData['merchant_param5'];
                         $ai_vital_misa->save();
+
+                        // If it's a longevity plan purchase and plan_id is valid
+                        $planId = $responseData['merchant_param4'] ?? null;
+                        if ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType && $planId) {
+                            $longevityPlan = LongevityPlan::find($planId);
+                            if ($longevityPlan) {
+                                $expiryDate = null;
+                                if (!empty($longevityPlan->plan_expiry_days)) {
+                                    $expiryDate = \Carbon\Carbon::now()->addDays((int)$longevityPlan->plan_expiry_days)->format('Y-m-d');
+                                }
+                                UserLongevityPlan::firstOrCreate(
+                                    ['order_id' => $responseData['order_id']],
+                                    [
+                                        'user_id' => $ai_vital_misa->user_id,
+                                        'plan_id' => $planId,
+                                        'amount' => $responseData['amount'],
+                                        'status' => 1,
+                                        'expiry_date' => $expiryDate,
+                                    ]
+                                );
+
+                                // Optionally link to ai_vitals table as requested
+                                \App\Models\AI_Vital::create([
+                                    'user_id' => $ai_vital_misa->user_id,
+                                    'plan_id' => $planId,
+                                    'is_longevity' => 1,
+                                    'scan_date' => \Carbon\Carbon::now()->format('Y-m-d'),
+                                    'report' => '',
+                                    'senoclock_ai_response' => [],
+                                    'shen_ai' => [],
+                                ]);
+                            }
+                        }
                     }
 
                     else if($status == 'Failure'){
