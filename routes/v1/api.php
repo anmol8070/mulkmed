@@ -156,6 +156,9 @@ use App\Http\Controllers\v1\PatientEmrReportController;
         Route::post('/ccavenue/initiate-Mesa-before-chat', [CcavenueController::class, 'initiatePaymentMesaBeforeChat']);
         Route::get('/ccavenue/successAIVitalScan', [CcavenueController::class, 'successAIVitalScan']);
 
+        // Longevity Plan Payment
+        Route::post('/ccavenue/initiate-longevity', [CcavenueController::class, 'initiatePaymentLongevity']);
+
         // Notification
         Route::post('fetchNotification', [UsersController::class, 'fetchNotification'])->middleware('checkHeader');
         Route::get('TEST_sendNotificationToUser', [UsersController::class, 'TEST_sendNotificationToUser']);
