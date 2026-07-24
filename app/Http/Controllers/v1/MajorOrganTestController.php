@@ -29,6 +29,7 @@ class MajorOrganTestController extends Controller
                     'id' => $item->id,
                     'name' => $item->name,
                     'icon' => !empty($item->icon) ? ltrim($item->icon, '/') : null,
+                    'currency' => $currency,
                     'price' => number_format((float) CurrencyHelper::convert($item->price, $currency), 2, '.', ''),
                     'biomarker_count' => count($biomarkers),
                     'biomarkers' => $biomarkers,
@@ -38,6 +39,7 @@ class MajorOrganTestController extends Controller
         return response()->json([
             'status' => true,
             'message' => 'Major organ tests fetched successfully',
+            'currency' => $currency,
             'data' => $tests,
         ]);
     }
@@ -122,7 +124,7 @@ class MajorOrganTestController extends Controller
 
             $analysis['lab_report_id'] = $labReport->id;
             $analysis['user_id'] = (int) $request->user_id;
-            
+
             $currency = CurrencyHelper::getUserCurrency();
             $analysis['to_pay'] = CurrencyHelper::convert((float) ($analysis['to_pay'] ?? 0), $currency);
 
@@ -157,11 +159,13 @@ class MajorOrganTestController extends Controller
         return response()->json([
             'status' => true,
             'message' => 'Package fetched successfully',
+            'currency' => $currency,
             'data' => [
                 'id' => $package->id,
                 'title' => $package->title,
                 'badge' => $package->badge,
                 'description' => $package->description,
+                'currency' => $currency,
                 'price' => number_format((float) CurrencyHelper::convert($package->price, $currency), 2, '.', ''),
                 'image' => !empty($package->image) ? GlobalFunction::createMediaUrl($package->image) : null,
                 'status' => (int) $package->status,
@@ -205,11 +209,13 @@ class MajorOrganTestController extends Controller
         return response()->json([
             'status' => true,
             'message' => 'Plan details fetched successfully',
+
             'data' => [
                 'id' => $package->id,
                 'title' => $package->title,
                 'badge' => $package->badge,
                 'description' => $package->description,
+                'currency' => $currency,
                 'price' => number_format((float) CurrencyHelper::convert($package->price, $currency), 2, '.', ''),
                 'image' => !empty($package->image)
                     ? ltrim($package->image, '/')
@@ -259,40 +265,230 @@ class MajorOrganTestController extends Controller
             ], 422);
         }
 
-        $package = null;
+        if ($selectPackage) {
+            $package = null;
         if ($request->filled('package_id')) {
             $package = MajorOrganPackage::where('status', 1)->find($request->package_id);
         } else {
             $package = MajorOrganPackage::where('status', 1)->first();
         }
 
-        if ($selectPackage && !$package) {
+            if (!$package) {
             return response()->json([
                 'status' => false,
                 'message' => 'Package not found.',
             ], 404);
         }
 
-        if ($selectPackage) {
             $tests = MajorOrganTest::where('status', 1)
                 ->orderBy('display_order', 'asc')
                 ->orderBy('id', 'asc')
                 ->get();
+            
+            $payload = $this->buildSelectionPayload($request->user_id, 'package', $package, $tests);
+            
+            \App\Models\MajorOrganUserSelection::updateOrCreate(
+                ['user_id' => (int) $request->user_id, 'status' => 1, 'selection_type' => 'package'],
+                $payload
+            );
         } else {
-            $tests = MajorOrganTest::where('status', 1)
-                ->whereIn('id', $organTestIds)
-                ->orderBy('display_order', 'asc')
-                ->orderBy('id', 'asc')
+            $existingIndividualSelections = \App\Models\MajorOrganUserSelection::where('user_id', (int) $request->user_id)
+                ->where('status', 1)
+                ->where('selection_type', 'individual')
                 ->get();
+            
+            $existingTestIds = [];
+            foreach ($existingIndividualSelections as $sel) {
+                $testArr = $sel->selected_organ_tests ?? [];
+                if (!empty($testArr) && isset($testArr[0]['id'])) {
+                    $existingTestIds[] = $testArr[0]['id'];
+                }
+            }
+
+            foreach ($organTestIds as $testId) {
+                if (!in_array($testId, $existingTestIds)) {
+                    $test = MajorOrganTest::where('status', 1)->where('id', $testId)->get();
+                    if ($test->isNotEmpty()) {
+                        $payload = $this->buildSelectionPayload($request->user_id, 'individual', null, $test);
+                        \App\Models\MajorOrganUserSelection::create($payload);
+                    }
+                }
+            }
         }
 
-        if ($tests->isEmpty()) {
+        // Fetch all active selections for this user to return as an array
+        $allSelections = \App\Models\MajorOrganUserSelection::where('user_id', (int) $request->user_id)
+            ->where('status', 1)
+            ->orderBy('id', 'desc')
+            ->get();
+
+        $data = $allSelections->map(function ($sel) {
+            return $this->formatSelection($sel);
+        });
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Selection saved successfully',
+            'currency' => CurrencyHelper::getUserCurrency(),
+            'data' => $data,
+        ]);
+    }
+
+    /**
+     * Get saved package/organ selection for a user.
+     */
+    public function getSelection(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'user_id' => 'required|integer|exists:users,id',
+            'selection_type' => 'nullable|string|in:package,individual',
+            'package_id' => 'nullable|string',
+            'id' => 'nullable|string',
+            'organ_test_id' => 'nullable|string',
+        ]);
+
+        if ($validator->fails()) {
             return response()->json([
                 'status' => false,
-                'message' => 'No organ tests found for selection.',
-            ], 404);
+                'message' => $validator->errors()->first(),
+            ], 422);
         }
 
+        $currency = CurrencyHelper::getUserCurrency();
+
+        // If selection_type is provided, fetch from master database (not user selections)
+        if ($request->filled('selection_type')) {
+            if ($request->selection_type === 'package') {
+                $query = MajorOrganPackage::where('status', 1);
+                
+                if ($request->filled('id')) {
+                    $ids = array_filter(array_map('intval', explode(',', $request->id)));
+                    if (!empty($ids)) {
+                        $query->whereIn('id', $ids);
+                    }
+                }
+
+                $packages = $query->get();
+                $allTests = MajorOrganTest::where('status', 1)->orderBy('display_order', 'asc')->orderBy('id', 'asc')->get();
+                
+                $totalAmountSum = 0;
+                $data = $packages->map(function ($package) use ($request, $allTests, &$totalAmountSum) {
+                    $payload = $this->buildSelectionPayload($request->user_id, 'package', $package, $allTests);
+                    $mockModel = new MajorOrganUserSelection($payload);
+                    $mockModel->id = $package->id;
+                    $totalAmountSum += (float) $mockModel->total_amount;
+                    return $this->formatSelection($mockModel);
+                });
+
+                return response()->json([
+                    'status' => true,
+                    'message' => 'Packages fetched successfully',
+                    'currency' => $currency,
+                    'total_amount' => number_format((float) CurrencyHelper::convert($totalAmountSum, $currency), 2, '.', ''),
+                    'data' => $data,
+                ]);
+            } elseif ($request->selection_type === 'individual') {
+                $query = MajorOrganTest::where('status', 1);
+                
+                if ($request->filled('id')) {
+                    $ids = array_filter(array_map('intval', explode(',', $request->id)));
+                    if (!empty($ids)) {
+                        $query->whereIn('id', $ids);
+                    }
+                }
+
+                $tests = $query->orderBy('display_order', 'asc')->orderBy('id', 'asc')->get();
+                
+                $totalAmountSum = 0;
+                $data = $tests->map(function ($test) use ($request, &$totalAmountSum) {
+                    $collection = collect([$test]);
+                    $payload = $this->buildSelectionPayload($request->user_id, 'individual', null, $collection);
+                    $mockModel = new MajorOrganUserSelection($payload);
+                    $mockModel->id = $test->id;
+                    $totalAmountSum += (float) $mockModel->total_amount;
+                    return $this->formatSelection($mockModel);
+                });
+
+                return response()->json([
+                    'status' => true,
+                    'message' => 'Individual tests fetched successfully',
+                    'currency' => $currency,
+                    'total_amount' => number_format((float) CurrencyHelper::convert($totalAmountSum, $currency), 2, '.', ''),
+                    'data' => $data,
+                ]);
+            }
+        }
+
+        // If no selection_type is provided, fetch user's cart selections
+        $query = MajorOrganUserSelection::where('user_id', (int) $request->user_id)
+            ->where('status', 1);
+
+        $selections = $query->orderBy('id', 'desc')->get();
+
+        if ($selections->isEmpty()) {
+            return response()->json([
+                'status' => true,
+                'message' => 'No selection found',
+                'currency' => $currency,
+                'total_amount' => '0.00',
+                'data' => [],
+            ]);
+        }
+
+        $totalAmountSum = 0;
+        $data = $selections->map(function ($sel) use (&$totalAmountSum) {
+            $totalAmountSum += (float) $sel->total_amount;
+            return $this->formatSelection($sel);
+        });
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Selections fetched successfully',
+            'currency' => $currency,
+            'total_amount' => number_format((float) CurrencyHelper::convert($totalAmountSum, $currency), 2, '.', ''),
+            'data' => $data,
+        ]);
+    }
+
+    protected function formatSelection(MajorOrganUserSelection $selection): array
+    {
+        $currency = CurrencyHelper::getUserCurrency();
+        $data = [
+            'id' => $selection->id,
+            'user_id' => (int) $selection->user_id,
+            'selection_type' => $selection->selection_type,
+            'organ_health_check_count' => (int) $selection->organ_health_check_count,
+            'total_biomarkers' => (int) $selection->total_biomarkers,
+            'summary' => $selection->organ_health_check_count . ' Organ Health Check • ' . $selection->total_biomarkers . ' Biomarkers',
+            'currency' => $currency,
+            'price' => number_format((float) CurrencyHelper::convert($selection->total_amount, $currency), 2, '.', ''),
+            'status' => (int) $selection->status,
+        ];
+
+        if ($selection->selection_type === 'package' && $selection->package_id) {
+            $data['package'] = [
+                'id' => $selection->package_id,
+                'title' => $selection->package_title,
+                'badge' => $selection->package_badge,
+                'currency' => $currency,
+                'price' => number_format((float) CurrencyHelper::convert($selection->package_price, $currency), 2, '.', ''),
+                'selected' => true,
+                'organ_health_check_count' => (int) $selection->organ_health_check_count,
+                'total_biomarkers' => (int) $selection->total_biomarkers,
+                'summary' => $selection->organ_health_check_count . ' Organ Health Check • ' . $selection->total_biomarkers . ' Biomarkers',
+            ];
+            $data['selected_organ_tests'] = $selection->selected_organ_tests ?? [];
+            $data['selected_biomarkers'] = $selection->selected_biomarkers ?? [];
+        } else {
+            $data['selected_organ_tests'] = $selection->selected_organ_tests ?? [];
+            $data['selected_biomarkers'] = $selection->selected_biomarkers ?? [];
+        }
+
+        return $data;
+    }
+
+    private function buildSelectionPayload($userId, $selectionType, $package, $tests)
+    {
         $allBiomarkers = [];
         $selectedOrganTests = $tests->map(function ($item) use (&$allBiomarkers) {
             $biomarkers = is_array($item->biomarkers) ? $item->biomarkers : [];
@@ -314,18 +510,17 @@ class MajorOrganTestController extends Controller
         $organCount = count($selectedOrganTests);
         $biomarkerCount = count($allBiomarkers);
 
-        if ($selectPackage) {
+        $totalAmount = 0;
+        if ($selectionType === 'package' && $package) {
             $totalAmount = (float) $package->price;
-            $selectionType = 'package';
         } else {
             $totalAmount = (float) $tests->sum(function ($item) {
                 return (float) $item->price;
             });
-            $selectionType = 'individual';
         }
 
-        $payload = [
-            'user_id' => (int) $request->user_id,
+        return [
+            'user_id' => (int) $userId,
             'selection_type' => $selectionType,
             'package_id' => $package ? $package->id : null,
             'package_title' => $package ? $package->title : null,
@@ -338,91 +533,5 @@ class MajorOrganTestController extends Controller
             'total_amount' => $totalAmount,
             'status' => 1,
         ];
-
-        $selection = MajorOrganUserSelection::updateOrCreate(
-            ['user_id' => (int) $request->user_id, 'status' => 1],
-            $payload
-        );
-
-        return response()->json([
-            'status' => true,
-            'message' => 'Selection saved successfully',
-            'currency' => CurrencyHelper::getUserCurrency(),
-            'data' => $this->formatSelection($selection),
-        ]);
-    }
-
-    /**
-     * Get saved package/organ selection for a user.
-     */
-    public function getSelection(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'user_id' => 'required|integer|exists:users,id',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'status' => false,
-                'message' => $validator->errors()->first(),
-            ], 422);
-        }
-
-        $selection = MajorOrganUserSelection::where('user_id', (int) $request->user_id)
-            ->where('status', 1)
-            ->orderBy('id', 'desc')
-            ->first();
-
-        if (!$selection) {
-            return response()->json([
-                'status' => true,
-                'message' => 'No selection found',
-                'data' => null,
-            ]);
-        }
-
-        return response()->json([
-            'status' => true,
-            'message' => 'Selection fetched successfully',
-            'currency' => CurrencyHelper::getUserCurrency(),
-            'data' => $this->formatSelection($selection),
-        ]);
-    }
-
-    protected function formatSelection(MajorOrganUserSelection $selection): array
-    {
-        $currency = CurrencyHelper::getUserCurrency();
-        $data = [
-            'id' => $selection->id,
-            'user_id' => (int) $selection->user_id,
-            'selection_type' => $selection->selection_type,
-            'organ_health_check_count' => (int) $selection->organ_health_check_count,
-            'total_biomarkers' => (int) $selection->total_biomarkers,
-            'summary' => $selection->organ_health_check_count . ' Organ Health Check • ' . $selection->total_biomarkers . ' Biomarkers',
-            'total_amount' => number_format((float) CurrencyHelper::convert($selection->total_amount, $currency), 2, '.', ''),
-            'status' => (int) $selection->status,
-        ];
-
-        if ($selection->selection_type === 'package' && $selection->package_id) {
-            // Package selected: show package + all included biomarkers/organ tests.
-            $data['package'] = [
-                'id' => $selection->package_id,
-                'title' => $selection->package_title,
-                'badge' => $selection->package_badge,
-                'price' => number_format((float) CurrencyHelper::convert($selection->package_price, $currency), 2, '.', ''),
-                'selected' => true,
-                'organ_health_check_count' => (int) $selection->organ_health_check_count,
-                'total_biomarkers' => (int) $selection->total_biomarkers,
-                'summary' => $selection->organ_health_check_count . ' Organ Health Check • ' . $selection->total_biomarkers . ' Biomarkers',
-            ];
-            $data['selected_organ_tests'] = $selection->selected_organ_tests ?? [];
-            $data['selected_biomarkers'] = $selection->selected_biomarkers ?? [];
-        } else {
-            // Individual selected: show organ tests, hide package.
-            $data['selected_organ_tests'] = $selection->selected_organ_tests ?? [];
-            $data['selected_biomarkers'] = $selection->selected_biomarkers ?? [];
-        }
-
-        return $data;
     }
 }

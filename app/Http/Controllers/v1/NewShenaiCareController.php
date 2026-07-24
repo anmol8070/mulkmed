@@ -12,9 +12,10 @@ use App\Models\Users;
 use App\Models\MajorOrganPackage;
 use App\Models\MajorOrganTest;
 use App\Models\LongevityPlan;
+use App\Models\UserLongevityPlan;
 use App\Services\SenoclockAiService;
 use App\Mail\AiVitalReportMail;
-use App\Functions\GlobalFunction;
+use App\Models\GlobalFunction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -164,6 +165,7 @@ $triggerId = 1;
                     'id' => $item->id,
                     'name' => $item->name,
                     'icon' => !empty($item->icon) ? ltrim($item->icon, '/') : null,
+                    'currency' => $currency,
                     'price' => number_format((float) CurrencyHelper::convert($item->price, $currency), 2, '.', ''),
                     'biomarker_count' => count($biomarkers),
                     'biomarkers' => $biomarkers,
@@ -179,6 +181,7 @@ $triggerId = 1;
                 'title' => $package->title,
                 'badge' => $package->badge,
                 'description' => $package->description,
+                'currency' => $currency,
                 'price' => number_format((float) CurrencyHelper::convert($package->price, $currency), 2, '.', ''),
                 'image' => !empty($package->image) ? ltrim($package->image, '/') : null,
                 'status' => (int) $package->status,
@@ -202,6 +205,7 @@ $triggerId = 1;
                     'title' => $item->title,
                     'subtitle' => $item->subtitle,
                     'description' => $item->description,
+                    'currency' => $currency,
                     'price' => number_format((float) CurrencyHelper::convert($item->price, $currency), 2, '.', ''),
                     'image' => !empty($item->image) ? ltrim($item->image, '/') : null,
                     'whats_included' => $whatsIncluded,
@@ -212,6 +216,7 @@ $triggerId = 1;
         return response()->json([
             'status' => true,
             'message' => 'Latest Longevity Report retrieved successfully.',
+            'currency' => $currency,
             'title' => 'Mulk Longevity Report',
             'priority_parameters' => [
                 'title' => 'Priority Parameters',
@@ -754,4 +759,56 @@ $triggerId = 1;
         return $pdf->download($filename);
     }
 
+    public function myRetreatPlans(Request $request)
+    {
+        $userId = $request->query('user_id', $request->input('user_id'));
+        if (empty($userId)) {
+            return response()->json([
+                'status' => false,
+                'message' => 'user_id is required.',
+            ], 400);
+        }
+
+        $planId = $request->query('plan_id', $request->input('plan_id'));
+
+        $query = UserLongevityPlan::with('plan')->where('user_id', $userId)->orderBy('id', 'desc');
+        if (!empty($planId)) {
+            $query->where('plan_id', $planId);
+        }
+        $userPlans = $query->get();
+        $today = \Carbon\Carbon::today();
+
+        $data = [];
+        foreach ($userPlans as $up) {
+            // Check expiry and update if needed
+            if ($up->status === 'active' && !empty($up->expiry_date)) {
+                $expiryDate = \Carbon\Carbon::parse($up->expiry_date);
+                if ($expiryDate->isPast() && !$expiryDate->isToday()) {
+                    $up->status = 'expired';
+                    $up->save();
+                }
+            }
+
+            if ($up->plan) {
+                $data[] = [
+                    'id' => $up->plan->id,
+                    'title' => $up->plan->title,
+                    'subtitle' => $up->plan->subtitle,
+                    'image' => !empty($up->plan->image) ? GlobalFunction::createMediaUrl($up->plan->image) : null,
+                    'whats_included' => is_string($up->plan->whats_included) ? json_decode($up->plan->whats_included, true) : $up->plan->whats_included,
+                    'benefits' => is_string($up->plan->benefits) ? json_decode($up->plan->benefits, true) : $up->plan->benefits,
+                    'status' => $up->status,
+                    'expiry_date' => $up->expiry_date,
+                    'purchased_at' => $up->created_at->format('Y-m-d H:i:s'),
+                ];
+            }
+        }
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Retreat plans fetched successfully.',
+            'count' => count($data),
+            'plans' => $data,
+        ]);
     }
+}

@@ -487,5 +487,5 @@ use App\Http\Controllers\v1\PatientEmrReportController;
         Route::get('vitals/{id?}', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'getVital']);
         Route::get('longevityReportPdf', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'longevityReportPdf'])->name('newshenai.longevityReportPdf');
         Route::get('downloadLatestLongevityReportPdf', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'downloadLatestLongevityReportPdf']);
+        Route::any('myRetreatPlans', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'myRetreatPlans'])->name('myRetreatPlans');
     });
-         

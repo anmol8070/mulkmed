@@ -72,6 +72,7 @@ class LongevityPlanController extends Controller
                 . ' data-status="' . (int) $item->status . '"'
                 . ' data-display_order="' . (int) $item->display_order . '"'
                 . ' data-price="' . e($item->price) . '"'
+                . ' data-plan_expiry_days="' . e($item->plan_expiry_days) . '"'
                 . ' data-whats_included="' . e(json_encode($whatsIncluded)) . '"'
                 . ' data-benefits="' . e(json_encode($benefits)) . '"'
                 . ' rel="' . $item->id . '">' . __('Edit') . '</a>';
@@ -83,6 +84,7 @@ class LongevityPlanController extends Controller
                 e($item->title),
                 e($item->subtitle),
                 e($item->price),
+                e($item->plan_expiry_days) ?: '-',
                 count($whatsIncluded) . ' ' . __('Items'),
                 count($benefits) . ' ' . __('Items'),
                 $status,
@@ -113,6 +115,7 @@ class LongevityPlanController extends Controller
         $item->benefits = $benefits;
         $item->status = (int) $request->status;
         $item->price = $request->price;
+        $item->plan_expiry_days = $request->plan_expiry_days;
         $item->display_order = (int) ($request->display_order ?? 0);
 
         if ($request->hasFile('image')) {
@@ -139,6 +142,7 @@ class LongevityPlanController extends Controller
         $item->benefits = $this->normalizeList($request->input('benefits', []));
         $item->status = (int) $request->status;
         $item->price = $request->price;
+        $item->plan_expiry_days = $request->plan_expiry_days;
         $item->display_order = (int) ($request->display_order ?? 0);
 
         if ($request->hasFile('image')) {
