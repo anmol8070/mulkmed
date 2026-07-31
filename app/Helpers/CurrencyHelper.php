@@ -9,7 +9,7 @@ class CurrencyHelper
     public static function rates(string $base = 'AED'): array
     {
         return cache()->remember("currency_rates_{$base}", 3600, function () use ($base) {
-            $response = Http::get("https://open.er-api.com/v6/latest/{$base}");
+            $response = Http::withoutVerifying()->get("https://open.er-api.com/v6/latest/{$base}");
 
             if (! $response->successful()) {
                 return [];

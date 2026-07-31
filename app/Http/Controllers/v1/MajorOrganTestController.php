@@ -128,6 +128,8 @@ class MajorOrganTestController extends Controller
             $currency = CurrencyHelper::getUserCurrency();
             $analysis['to_pay'] = CurrencyHelper::convert((float) ($analysis['to_pay'] ?? 0), $currency);
 
+            \App\Jobs\ProcessSenoclockIntegration::dispatch($labReport->id)->afterResponse();
+
             return response()->json([
                 'status' => true,
                 'message' => 'AI analysis completed successfully',
@@ -139,6 +141,132 @@ class MajorOrganTestController extends Controller
                 'status' => false,
                 'message' => $e->getMessage(),
                 'data' => null,
+            ], 500);
+        }
+    }
+
+    private function getSenoclockToken(&$errorResponse = null)
+    {
+        $baseUrl = config('services.senoclock.base_url', 'https://api-euc1.senoclock.ai');
+        $email = config('services.senoclock.email');
+        $password = config('services.senoclock.password');
+
+        $response = \Illuminate\Support\Facades\Http::withoutVerifying()->post("{$baseUrl}/rest-auth/login/", [
+            'email' => $email,
+            'password' => $password
+        ]);
+
+        if ($response->successful()) {
+            $key = $response->json('key') ?? $response->json('token') ?? $response->json('access_token');
+            if ($key) return $key;
+            $errorResponse = 'Success but no token found: ' . $response->body();
+            return null;
+        }
+
+        // Try username if email fails
+        $response2 = \Illuminate\Support\Facades\Http::withoutVerifying()->post("{$baseUrl}/rest-auth/login/", [
+            'username' => $email,
+            'password' => $password
+        ]);
+
+        if ($response2->successful()) {
+            $key = $response2->json('key') ?? $response2->json('token') ?? $response2->json('access_token');
+            if ($key) return $key;
+            $errorResponse = 'Success but no token found in response2: ' . $response2->body();
+            return null;
+        }
+        
+        $errorResponse = $response->body() . ' | ' . $response2->body();
+        return null;
+    }
+
+    public function generateSenoclockReport(Request $request, LabReportBiomarkerAnalyzerService $analyzer)
+    {
+        $validator = Validator::make($request->all(), [
+            'senoclock_id' => 'required_without:lab_report_id|string',
+            'lab_report_id' => 'required_without:senoclock_id|integer|exists:lab_reports,id',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'status' => false,
+                'message' => $validator->errors()->first(),
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $senoclockId = $request->senoclock_id;
+
+        if ($request->has('lab_report_id') && !$senoclockId) {
+            $labReport = \App\Models\LabReport::find($request->lab_report_id);
+            if (!$labReport || empty($labReport->senoclock_id)) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Senoclock report is still generating in the background or not available for this lab report yet.',
+                ], 404);
+            }
+            $senoclockId = $labReport->senoclock_id;
+        }
+
+        try {
+            $authError = null;
+            $token = $this->getSenoclockToken($authError);
+            if (!$token) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Failed to authenticate with SenoClock API.',
+                    'error' => $authError,
+                ], 500);
+            }
+
+            $baseUrl = config('services.senoclock.base_url', 'https://api-euc1.senoclock.ai');
+
+            // Download PDF and save locally
+            $downloadUrl = "{$baseUrl}/dl-api/report/download/?pdf_report=true&id=" . $senoclockId;
+            $pdfResponse = \Illuminate\Support\Facades\Http::withoutVerifying()->withToken($token)->get($downloadUrl);
+
+            $localUrl = '';
+            if ($pdfResponse->successful()) {
+                $contentType = $pdfResponse->header('Content-Type');
+                if (strpos($contentType, 'application/json') !== false) {
+                    return response()->json([
+                        'status' => false,
+                        'message' => 'SenoClock API returned JSON instead of a PDF. Report might still be processing.',
+                        'senoclock_response' => $pdfResponse->json(),
+                    ], 500);
+                }
+
+                $fileName = "senoclock_{$senoclockId}.pdf";
+                
+                $uploadDir = public_path('uploads');
+                if (!file_exists($uploadDir)) {
+                    @mkdir($uploadDir, 0777, true);
+                }
+
+                file_put_contents($uploadDir . '/' . $fileName, $pdfResponse->body());
+                
+                $localUrl = asset('uploads/' . $fileName);
+            } else {
+                 return response()->json([
+                    'status' => false,
+                    'message' => 'Failed to download PDF from SenoClock.',
+                    'senoclock_error' => $pdfResponse->body()
+                ], 500);
+            }
+
+            return response()->json([
+                'status' => true,
+                'message' => 'SenoClock report generated successfully.',
+                'data' => [
+                    'senoclock_id' => $senoclockId,
+                    'download_url' => $localUrl,
+                ]
+            ]);
+
+        } catch (\Throwable $e) {
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage(),
             ], 500);
         }
     }

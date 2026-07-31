@@ -335,6 +335,7 @@ use App\Http\Controllers\v1\PatientEmrReportController;
         Route::get('list', [MajorOrganTestController::class, 'list'])->middleware('checkHeader')->name('list');
         Route::get('planDetails', [MajorOrganTestController::class, 'planDetails'])->middleware('checkHeader')->name('planDetails');
         Route::post('analyzeReport', [MajorOrganTestController::class, 'analyzeReport'])->middleware('checkHeader')->name('analyzeReport');
+        Route::post('generateSenoclockReport', [MajorOrganTestController::class, 'generateSenoclockReport'])->middleware('checkHeader')->name('generateSenoclockReport');
         Route::post('saveSelection', [MajorOrganTestController::class, 'saveSelection'])->middleware('checkHeader')->name('saveSelection');
         Route::get('getSelection', [MajorOrganTestController::class, 'getSelection'])->middleware('checkHeader')->name('getSelection');
  
