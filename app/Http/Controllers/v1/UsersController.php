@@ -2919,7 +2919,7 @@ Team Mulk Med.";
                                 ->where('is_deleted', 0)
                                 ->get();
                 if ($section->isEmpty()) {
-                    $section = DashboardBanners::where('name', 'like', '%Longevity%')
+                    $section = DashboardBanners::where('name', 'like', '%Longevity Care%')
                                     ->where('is_deleted', 0)
                                 ->get();
                 }
@@ -2927,6 +2927,20 @@ Team Mulk Med.";
                 {
                     $sequence->section_data = $section;
                     array_push($sectionSequence,$sequence);
+                }
+
+                // Separate section for Mulk Longevity Lab Report
+                $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
+                                ->where('is_deleted', 0)
+                                ->get();
+                if($labReportSection->isNotEmpty())
+                {
+                    $labSequence = clone $sequence;
+                    $labSequence->id = $sequence->id + 1000; // Give it a unique pseudo ID
+                    $labSequence->section_name = 'Mulk Longevity Lab Report';
+                    $labSequence->section_type = 'mulk_longevity_lab_report';
+                    $labSequence->section_data = $labReportSection;
+                    array_push($sectionSequence, $labSequence);
                 }
             }
 

@@ -257,6 +257,7 @@ class LabReportBiomarkerAnalyzerService
 
         try {
             $response = Http::timeout(90)
+                ->withoutVerifying()
                 ->asMultipart()
                 ->withHeaders(['apikey' => $apiKey])
                 ->post($endpoint, [
@@ -340,6 +341,7 @@ class LabReportBiomarkerAnalyzerService
 
         try {
             $response = Http::timeout(90)
+                ->withoutVerifying()
                 ->withToken($apiKey)
                 ->acceptJson()
                 ->post('https://api.openai.com/v1/chat/completions', $payload);
@@ -445,6 +447,74 @@ Return ONLY valid JSON with this shape:
 }
 Do not include markdown. Do not include explanations outside JSON.
 PROMPT;
+    }
+
+    public function extractSenoclockMarkersWithOpenAi(string $ocrText): array
+    {
+        $apiKey = config('services.openai.api_key');
+        if (empty($apiKey)) {
+            return [];
+        }
+
+        $system = <<<PROMPT
+You are an expert AI Document Analyst specializing in OCR document verification.
+Extract structured biomarker/test names from the OCR text of a lab report.
+Return ONLY valid JSON with this shape:
+{
+  "markers": {
+    "HDL": {
+      "range": "45-999",
+      "unit": "mg/dL",
+      "value": 42
+    },
+    "LDL": {
+      "range": "0-150",
+      "unit": "mg/dL",
+      "value": 97
+    }
+  }
+}
+If a value is not a number, try to clean it up (e.g. "42.5"). If it's a string like "Positive", you can return it as the value.
+Use standard abbreviations as keys if possible (HDL, LDL, TRIG, HGBA1C, GLC, ALT, AST, CRP, WBC, CREA, ALB, GGT, PLT, NA+, K+).
+Do not include markdown. Do not include explanations outside JSON.
+PROMPT;
+
+        $payload = [
+            'model' => config('services.openai.model', 'gpt-4o-mini'),
+            'temperature' => 0.1,
+            'response_format' => ['type' => 'json_object'],
+            'messages' => [
+                ['role' => 'system', 'content' => $system],
+                [
+                    'role' => 'user',
+                    'content' => "OCR text from lab report:\n\n{$ocrText}\n\nExtract biomarkers and return ONLY valid JSON.",
+                ],
+            ],
+        ];
+
+        try {
+            $response = Http::timeout(90)
+                ->withoutVerifying()
+                ->withToken($apiKey)
+                ->acceptJson()
+                ->post('https://api.openai.com/v1/chat/completions', $payload);
+
+            if (!$response->successful()) {
+                Log::error('OpenAI Senoclock extraction failed', [
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                ]);
+                return [];
+            }
+
+            $content = (string) data_get($response->json(), 'choices.0.message.content', '');
+            $parsed = $this->parseJsonFromLlm($content);
+
+            return $parsed['markers'] ?? [];
+        } catch (\Throwable $e) {
+            Log::error('OpenAI Senoclock extraction exception', ['message' => $e->getMessage()]);
+            return [];
+        }
     }
 
     protected function parseJsonFromLlm(string $content): ?array

@@ -320,6 +320,9 @@ const data = {
     "Mulk Longevity Care":{
         
     },
+    "Mulk Longevity Lab Report":{
+        
+    },
 };
 
 // add
