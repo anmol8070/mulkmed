@@ -36,6 +36,8 @@ class ProcessSenoclockIntegration implements ShouldQueue
      */
     public function handle()
     {
+        set_time_limit(300); // Allow up to 5 minutes for SenoClock to generate the PDF
+
         try {
             $labReport = LabReport::find($this->labReportId);
             if (!$labReport || !$labReport->document_path) {
@@ -52,47 +54,48 @@ class ProcessSenoclockIntegration implements ShouldQueue
                 return;
             }
 
-            // Authenticate with SenoClock
-            $token = $this->getSenoclockToken();
-            if (!$token) {
-                Log::error('ProcessSenoclockIntegration: Failed to authenticate with SenoClock API');
-                return;
-            }
-
-            $baseUrl = config('services.senoclock.base_url', 'https://api-euc1.senoclock.ai');
-
-            // Step 1: Upload to SenoClock
-            $uploadResponse = Http::withoutVerifying()->withToken($token)
-                ->attach('file', file_get_contents($documentPath), basename($documentPath))
-                ->put("{$baseUrl}/dl-api/file-upload/", [
-                    'process_execute' => 'true',
-                    'diet_preference' => 'non_veg',
-                    'preferred_language' => 'en'
-                ]);
-
-            if (!$uploadResponse->successful()) {
-                Log::error('ProcessSenoclockIntegration: Failed to upload document', ['error' => $uploadResponse->body()]);
-                return;
-            }
-
-            $senoclockId = $uploadResponse->json('id');
-            if (!$senoclockId) {
-                Log::error('ProcessSenoclockIntegration: Invalid response from file-upload API');
-                return;
-            }
-
-            // Step 2: Build Senoclock Biomarkers using OpenAI (as originally done)
-            $analyzer = app(\App\Services\LabReportBiomarkerAnalyzerService::class);
-            $ocrText = $labReport->ocr_text ?? '';
-            $extractedMarkersPayload = $analyzer->extractSenoclockMarkersWithOpenAi($ocrText);
+            $senoclockService = app(\App\Services\SenoclockService::class);
             
-            $senoclockMarkers = $extractedMarkersPayload['markers'] ?? [];
-
-            if (empty($senoclockMarkers)) {
-                Log::warning('ProcessSenoclockIntegration: No markers extracted for Senoclock', ['lab_report_id' => $this->labReportId]);
+            // Authenticate
+            if (!$senoclockService->authenticate()) {
+                return;
             }
 
-            // Step 3: Execute SenoClock Analysis
+            // Upload
+            $senoclockId = $senoclockService->uploadDocument($documentPath);
+            if (!$senoclockId) {
+                return;
+            }
+
+            // Step 2: Build Senoclock Biomarkers dynamically from the initial AI analysis
+            $analysis = $labReport->analysis_response ?? [];
+            if (is_string($analysis)) {
+                $analysis = json_decode($analysis, true) ?? [];
+            }
+            $extractedBiomarkers = $analysis['extracted_biomarkers'] ?? [];
+
+            $senoclockMarkers = [];
+            foreach ($extractedBiomarkers as $marker) {
+                if (is_array($marker) && !empty($marker['name']) && !empty($marker['value'])) {
+                    $key = $this->mapToSenoclockKey($marker['name']);
+                    if ($key) {
+                        $senoclockMarkers[$key] = [
+                            'value' => (float) $marker['value'],
+                            'unit' => $marker['unit'] ?? '',
+                            'range' => $marker['range'] ?? '',
+                        ];
+                    }
+                }
+            }
+
+            // If GPT failed to extract markers, we cannot generate a Senoclock report
+            if (empty($senoclockMarkers)) {
+                Log::error("ProcessSenoclockIntegration: No markers extracted for Senoclock, aborting report generation", ['lab_report_id' => $this->labReportId]);
+                $labReport->update(['senoclock_id' => 'FAILED']);
+                return;
+            }
+
+            // Execute
             $user = User::find($labReport->user_id);
             $age = 25; // Default if not found
             $gender = 'male'; // Default if not found
@@ -102,34 +105,21 @@ class ProcessSenoclockIntegration implements ShouldQueue
                     $age = \Carbon\Carbon::parse($user->dob)->age;
                 }
                 if (isset($user->gender)) {
-                    $gender = strtolower($user->gender);
+                    $genderVal = (string) $user->gender;
+                    if ($genderVal === '0' || strtolower($genderVal) === 'male') {
+                        $gender = 'male';
+                    } elseif ($genderVal === '1' || strtolower($genderVal) === 'female') {
+                        $gender = 'female';
+                    } else {
+                        $gender = strtolower($genderVal);
+                    }
                 }
             }
 
-            $executePayload = [
-                'id' => $senoclockId,
-                'external_id' => strval($labReport->user_id),
-                'dob' => null,
-                'age' => $age,
-                'gender' => $gender,
-                'test_date' => $labReport->created_at->format('Y-m-d'),
-                'markers' => $senoclockMarkers,
-            ];
-
-            $executeResponse = Http::withoutVerifying()->withToken($token)
-                ->post("{$baseUrl}/dl-api/file-execute/", $executePayload);
-
-            if (!$executeResponse->successful()) {
-                Log::error('ProcessSenoclockIntegration: Failed to execute SenoClock API', [
-                    'error' => $executeResponse->body(),
-                    'payload' => $executePayload
-                ]);
-                return;
-            }
-
-            $executeJson = $executeResponse->json();
-            if (($executeJson['status'] ?? '') !== 'Ok') {
-                Log::error('ProcessSenoclockIntegration: Execute API did not return Ok', ['response' => $executeJson]);
+            $externalId = 'mulkmed_' . $labReport->id;
+            $testDate = $labReport->created_at->format('Y-m-d');
+            
+            if (!$senoclockService->executeAlgorithm($senoclockId, $externalId, $age, $gender, $testDate, $senoclockMarkers)) {
                 return;
             }
 
@@ -137,60 +127,20 @@ class ProcessSenoclockIntegration implements ShouldQueue
             $labReport->senoclock_id = $senoclockId;
             $labReport->save();
 
-            // Step 4: Generate Senoclock PDF Report
-            $downloadUrl = "{$baseUrl}/dl-api/report/download/?pdf_report=true&id=" . $senoclockId;
-            $pdfResponse = Http::withoutVerifying()->withToken($token)->get($downloadUrl);
+            // Download (SenoClock takes ~2 minutes to generate the report. 30 retries * 5s = 150 seconds)
+            $destinationDir = public_path('uploads');
+            $downloadResult = $senoclockService->downloadPdfWithRetry($senoclockId, $destinationDir, null, 30, 5);
 
-            if ($pdfResponse->successful()) {
-                $fileName = "senoclock_{$senoclockId}.pdf";
-                
-                $uploadDir = public_path('uploads');
-                if (!file_exists($uploadDir)) {
-                    @mkdir($uploadDir, 0777, true);
-                }
-
-                file_put_contents($uploadDir . '/' . $fileName, $pdfResponse->body());
-                
-                $localUrl = 'uploads/' . $fileName;
-                $labReport->senoclock_pdf_path = $localUrl;
+            if ($downloadResult['success']) {
+                $labReport->senoclock_pdf_path = 'uploads/' . $downloadResult['path'];
                 $labReport->save();
+                Log::info('ProcessSenoclockIntegration: Successfully completed integration', ['lab_report_id' => $labReport->id]);
             } else {
-                Log::error('ProcessSenoclockIntegration: Failed to download PDF from SenoClock');
+                Log::error('ProcessSenoclockIntegration: Final download failed', ['error' => $downloadResult['error']]);
             }
 
         } catch (\Throwable $e) {
             Log::error('ProcessSenoclockIntegration: Exception caught', ['message' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
         }
-    }
-
-    private function getSenoclockToken()
-    {
-        $baseUrl = config('services.senoclock.base_url', 'https://api-euc1.senoclock.ai');
-        $email = config('services.senoclock.email');
-        $password = config('services.senoclock.password');
-
-        if (!$email || !$password) {
-            return null;
-        }
-
-        try {
-            $response = Http::withoutVerifying()->post("{$baseUrl}/rest-auth/login/", [
-                'email' => $email,
-                'password' => $password,
-            ]);
-
-            if ($response->successful()) {
-                return $response->json('key') ?? $response->json('token') ?? $response->json('access_token');
-            } else {
-                Log::error('ProcessSenoclockIntegration: Token auth failed', [
-                    'status' => $response->status(),
-                    'body' => $response->body()
-                ]);
-            }
-        } catch (\Exception $e) {
-            Log::error('ProcessSenoclockIntegration: Token Exception', ['message' => $e->getMessage()]);
-        }
-
-        return null;
     }
 }

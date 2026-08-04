@@ -256,7 +256,7 @@ class LabReportBiomarkerAnalyzerService
         $dataUrl = 'data:' . $mime . ';base64,' . $base64;
 
         try {
-            $response = Http::timeout(90)
+            $response = Http::timeout(240)
                 ->withoutVerifying()
                 ->asMultipart()
                 ->withHeaders(['apikey' => $apiKey])
@@ -326,6 +326,9 @@ class LabReportBiomarkerAnalyzerService
         if ($isPdf) {
             // Vision models need an image; fall back to PDF text extraction path.
             $pdfText = $this->extractTextFromPdf($file);
+            // Sanitize invalid UTF-8 characters to prevent json_encode errors
+            $pdfText = mb_convert_encoding($pdfText, 'UTF-8', 'UTF-8');
+            
             if ($pdfText === '' && $existingOcrText === '') {
                 Log::warning('OpenAI lab report analysis skipped: PDF has no extractable text and no OCR text provided');
                 return null;
@@ -340,7 +343,7 @@ class LabReportBiomarkerAnalyzerService
         }
 
         try {
-            $response = Http::timeout(90)
+            $response = Http::timeout(240)
                 ->withoutVerifying()
                 ->withToken($apiKey)
                 ->acceptJson()
@@ -437,14 +440,22 @@ class LabReportBiomarkerAnalyzerService
         return <<<'PROMPT'
 You are an expert AI Document Analyst specializing in OCR document verification and semantic comparison.
 Read OCR/lab report content even if it contains minor spelling mistakes.
-Extract structured biomarker/test names from the document.
-Ignore punctuation, capitalization, and small grammatical differences.
+Extract structured biomarker/test names from the document along with their numerical values, units, and reference ranges if present.
+Ignore punctuation, capitalization, and small grammatical differences in names.
 Return ONLY valid JSON with this shape:
 {
   "ocr_text": "full readable text extracted from the document",
-  "extracted_biomarkers": ["Hemoglobin (Hb)", "Total Cholesterol", "..."],
+  "extracted_biomarkers": [
+    {
+      "name": "Hemoglobin (Hb)",
+      "value": 12.5,
+      "unit": "g/dL",
+      "range": "12.0 - 15.5"
+    }
+  ],
   "confidence_score": 0.0
 }
+If a value is not found or is non-numerical, set it to null.
 Do not include markdown. Do not include explanations outside JSON.
 PROMPT;
     }
@@ -479,6 +490,8 @@ Use standard abbreviations as keys if possible (HDL, LDL, TRIG, HGBA1C, GLC, ALT
 Do not include markdown. Do not include explanations outside JSON.
 PROMPT;
 
+        $ocrText = mb_convert_encoding($ocrText, 'UTF-8', 'UTF-8');
+        
         $payload = [
             'model' => config('services.openai.model', 'gpt-4o-mini'),
             'temperature' => 0.1,
@@ -493,7 +506,7 @@ PROMPT;
         ];
 
         try {
-            $response = Http::timeout(90)
+            $response = Http::timeout(240)
                 ->withoutVerifying()
                 ->withToken($apiKey)
                 ->acceptJson()
@@ -694,7 +707,8 @@ PROMPT;
         }
 
         foreach ($extractedNames as $name) {
-            if ($this->namesMatch($needleNorm, $this->normalize($name))) {
+            $nameStr = is_array($name) ? ($name['name'] ?? '') : $name;
+            if ($this->namesMatch($needleNorm, $this->normalize((string) $nameStr))) {
                 return true;
             }
         }
@@ -708,7 +722,8 @@ PROMPT;
                 return true;
             }
             foreach ($extractedNames as $name) {
-                if ($this->namesMatch($this->normalize($alias), $this->normalize($name))) {
+                $nameStr = is_array($name) ? ($name['name'] ?? '') : $name;
+                if ($this->namesMatch($this->normalize($alias), $this->normalize((string) $nameStr))) {
                     return true;
                 }
             }
