@@ -208,14 +208,12 @@ class MajorOrganTestController extends Controller
                     'message' => 'Lab report not found.',
                 ], 404);
             }
-            
-            if ($labReport->senoclock_id === 'FAILED') {
+            if ($labReport->senoclock_status === 'failed') {
                 return response()->json([
                     'status' => false,
-                    'message' => 'SenoClock report generation failed because no valid biomarkers were found in the uploaded document.',
-                ], 400);
+                    'message' => 'SenoClock report generation failed in the background. Please try re-uploading your report.',
+                ], 422);
             }
-            
             if (empty($labReport->senoclock_id)) {
                 return response()->json([
                     'status' => false,
