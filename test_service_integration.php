@@ -81,6 +81,7 @@ echo "Database Values after execution:\n";
 echo "- senoclock_id: " . $labReport->senoclock_id . "\n";
 echo "- senoclock_pdf_path: " . $labReport->senoclock_pdf_path . "\n";
 echo "- senoclock_status: " . $labReport->senoclock_status . "\n";
+echo "- senoclock_generated_at: " . ($labReport->senoclock_generated_at ? $labReport->senoclock_generated_at->toDateTimeString() : 'null') . "\n";
 
 $success = true;
 if ($labReport->senoclock_id !== 'mock-report-id-99999') {
@@ -93,6 +94,10 @@ if ($labReport->senoclock_pdf_path !== 'uploads/senoclock_mock-report-id-99999.p
 }
 if ($labReport->senoclock_status !== 'completed') {
     echo "FAIL: senoclock_status should be completed\n";
+    $success = false;
+}
+if (!$labReport->senoclock_generated_at) {
+    echo "FAIL: senoclock_generated_at should not be null\n";
     $success = false;
 }
 
