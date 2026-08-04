@@ -199,7 +199,19 @@ class MajorOrganTestController extends Controller
 
         if ($request->has('lab_report_id') && !$senoclockId) {
             $labReport = \App\Models\LabReport::find($request->lab_report_id);
-            if (!$labReport || empty($labReport->senoclock_id)) {
+            if (!$labReport) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Lab report not found.',
+                ], 404);
+            }
+            if ($labReport->senoclock_status === 'failed') {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'SenoClock report generation failed in the background. Please try re-uploading your report.',
+                ], 422);
+            }
+            if (empty($labReport->senoclock_id)) {
                 return response()->json([
                     'status' => false,
                     'message' => 'Senoclock report is still generating in the background or not available for this lab report yet.',
