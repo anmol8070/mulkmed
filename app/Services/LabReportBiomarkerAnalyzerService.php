@@ -43,7 +43,17 @@ class LabReportBiomarkerAnalyzerService
     public function analyze(?UploadedFile $file, ?string $ocrText, Collection $organTests): array
     {
         $extraction = $this->extractFromDocument($file, $ocrText);
-        $extractedNames = $extraction['extracted_biomarkers'];
+        $extractedBiomarkers = $extraction['extracted_biomarkers'];
+        
+        $extractedNames = [];
+        foreach ($extractedBiomarkers as $item) {
+            if (is_array($item)) {
+                $extractedNames[] = $item['name'] ?? '';
+            } else {
+                $extractedNames[] = $item;
+            }
+        }
+        $extractedNames = array_values(array_filter(array_unique($extractedNames)));
         $extractedText = $extraction['ocr_text'];
 
         $available = [];
@@ -159,7 +169,7 @@ class LabReportBiomarkerAnalyzerService
                 'missing_biomarkers' => $this->averageConfidence($missing),
                 'comparison' => $avgSectionConfidence,
             ],
-            'extracted_biomarkers' => $extractedNames,
+            'extracted_biomarkers' => $extractedBiomarkers,
             'ocr_text' => $extractedText,
             'ocr_text_preview' => Str::limit($extractedText, 1500),
             'extraction_source' => $extraction['source'],
@@ -368,19 +378,30 @@ class LabReportBiomarkerAnalyzerService
             $biomarkers = [];
             foreach (($parsed['extracted_biomarkers'] ?? []) as $item) {
                 if (is_string($item) && trim($item) !== '') {
-                    $biomarkers[] = trim($item);
+                    $biomarkers[] = [
+                        'name' => trim($item),
+                        'value' => null,
+                        'unit' => null,
+                        'range' => null,
+                    ];
                 } elseif (is_array($item) && !empty($item['name'])) {
-                    $biomarkers[] = trim((string) $item['name']);
+                    $biomarkers[] = [
+                        'name' => trim((string) $item['name']),
+                        'value' => isset($item['value']) ? trim((string) $item['value']) : null,
+                        'unit' => isset($item['unit']) ? trim((string) $item['unit']) : null,
+                        'range' => isset($item['range']) ? trim((string) $item['range']) : null,
+                    ];
                 }
             }
 
             $ocrFromAi = trim((string) ($parsed['ocr_text'] ?? ''));
             if ($ocrFromAi === '') {
-                $ocrFromAi = implode("\n", $biomarkers);
+                $names = array_map(fn($b) => $b['name'], $biomarkers);
+                $ocrFromAi = implode("\n", $names);
             }
 
             return [
-                'extracted_biomarkers' => array_values(array_unique($biomarkers)),
+                'extracted_biomarkers' => $biomarkers,
                 'ocr_text' => $ocrFromAi,
                 'confidence' => (float) ($parsed['confidence_score'] ?? 0.9),
                 'source' => 'openai',
@@ -440,17 +461,23 @@ class LabReportBiomarkerAnalyzerService
         return <<<'PROMPT'
 You are an expert AI Document Analyst specializing in OCR document verification and semantic comparison.
 Read OCR/lab report content even if it contains minor spelling mistakes.
-Extract structured biomarker/test names from the document along with their numerical values, units, and reference ranges if present.
-Ignore punctuation, capitalization, and small grammatical differences in names.
+Extract structured biomarker/test details from the document.
+Ignore punctuation, capitalization, and small grammatical differences.
 Return ONLY valid JSON with this shape:
 {
   "ocr_text": "full readable text extracted from the document",
   "extracted_biomarkers": [
     {
       "name": "Hemoglobin (Hb)",
-      "value": 12.5,
+      "value": "14.2",
       "unit": "g/dL",
-      "range": "12.0 - 15.5"
+      "range": "12-16"
+    },
+    {
+      "name": "Total Cholesterol",
+      "value": "180",
+      "unit": "mg/dL",
+      "range": "100-200"
     }
   ],
   "confidence_score": 0.0
