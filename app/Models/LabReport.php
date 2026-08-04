@@ -27,6 +27,9 @@ class LabReport extends Model
         'overall_match_percentage',
         'confidence_score',
         'status',
+        'senoclock_id',
+        'senoclock_pdf_path',
+        'senoclock_status',
     ];
 
     protected $casts = [
@@ -40,5 +43,6 @@ class LabReport extends Model
         'overall_match_percentage' => 'decimal:2',
         'confidence_score' => 'decimal:2',
         'status' => 'integer',
+        'senoclock_status' => 'string',
     ];
 }

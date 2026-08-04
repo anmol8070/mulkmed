@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AI_Vital;
 use App\Models\Constants;
 use App\Models\Users;
+use App\Models\LabReport;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -500,5 +501,296 @@ class SenoclockAiService
         $baseUrl = rtrim((string) config('services.senoclock.base_url'), '/');
 
         return $baseUrl . $path;
+    }
+
+    /**
+     * Process Senoclock integration steps for a LabReport.
+     */
+    public function processLabReport(LabReport $labReport): void
+    {
+        try {
+            $labReport->senoclock_status = 'processing';
+            $labReport->save();
+
+            if (empty($labReport->document_path)) {
+                Log::error("Senoclock AI integration skipped: No document path for LabReport #{$labReport->id}");
+                $labReport->senoclock_status = 'failed';
+                $labReport->save();
+                return;
+            }
+
+            $documentPath = storage_path('app/public/' . ltrim($labReport->document_path, '/'));
+            if (!file_exists($documentPath)) {
+                $documentPath = public_path($labReport->document_path);
+            }
+
+            if (!file_exists($documentPath)) {
+                Log::error("Senoclock AI integration failed: Original PDF not found for LabReport #{$labReport->id} at {$documentPath}");
+                $labReport->senoclock_status = 'failed';
+                $labReport->save();
+                return;
+            }
+
+            $email = (string) config('services.senoclock.email');
+            $password = (string) config('services.senoclock.password');
+
+            $token = $this->fetchAccessToken($email, $password);
+            if (!$token) {
+                Log::error("Senoclock AI integration failed: Failed to get API token");
+                $labReport->senoclock_status = 'failed';
+                $labReport->save();
+                return;
+            }
+
+            // Step 1: Upload the original PDF
+            $fileId = $this->uploadPdfToSenoclock($documentPath, $token);
+            if (!$fileId) {
+                $labReport->senoclock_status = 'failed';
+                $labReport->save();
+                return;
+            }
+
+            // Save File ID immediately
+            $labReport->senoclock_id = $fileId;
+            $labReport->save();
+
+            // Step 2: Convert AI Biomarkers to Senoclock Format
+            $analysisResponse = $labReport->analysis_response;
+            $extractedBiomarkers = $analysisResponse['extracted_biomarkers'] ?? [];
+
+            $senoclockMarkers = $this->convertBiomarkersToSenoclockFormat($extractedBiomarkers);
+
+            // Step 3: Execute Senoclock Analysis
+            $user = Users::find($labReport->user_id);
+            $dob = null;
+            $age = null;
+            $gender = null;
+            if ($user) {
+                $dob = $user->dob ? \Carbon\Carbon::parse($user->dob)->format('Y-m-d') : null;
+                $age = $user->dob ? \Carbon\Carbon::parse($user->dob)->age : null;
+                if ($user->gender !== null) {
+                    $gender = $this->mapSex($user->gender) ?: strtolower((string)$user->gender);
+                }
+            }
+
+            $testDate = $labReport->created_at ? $labReport->created_at->format('Y-m-d') : null;
+
+            $executePayload = [
+                'id' => $fileId,
+                'external_id' => strval($labReport->user_id),
+                'dob' => $dob,
+                'age' => $age,
+                'gender' => $gender,
+                'test_date' => $testDate,
+                'markers' => $senoclockMarkers,
+            ];
+
+            $executeJson = $this->executeSenoclockAnalysis($fileId, $executePayload, $token);
+            if (!$executeJson || (isset($executeJson['status']) && $executeJson['status'] !== 'Ok')) {
+                Log::error("Senoclock AI integration: Execution failed for LabReport #{$labReport->id}");
+                $labReport->senoclock_status = 'failed';
+                $labReport->save();
+                return;
+            }
+
+            $reportId = $executeJson['report_id'] ?? $executeJson['id'] ?? $fileId;
+            $labReport->senoclock_id = $reportId;
+            $labReport->save();
+
+            // Step 4: Generate and Store PDF Report
+            $pdfPath = $this->downloadAndSaveSenoclockReport($reportId, $token);
+            if (!$pdfPath) {
+                $labReport->senoclock_status = 'failed';
+                $labReport->save();
+                return;
+            }
+
+            $labReport->senoclock_pdf_path = $pdfPath;
+            $labReport->senoclock_status = 'completed';
+            $labReport->save();
+
+            Log::info("Senoclock AI integration completed successfully for LabReport #{$labReport->id}");
+
+        } catch (\Throwable $e) {
+            Log::error("Senoclock AI integration exception: " . $e->getMessage(), [
+                'lab_report_id' => $labReport->id,
+                'trace' => $e->getTraceAsString(),
+            ]);
+            $labReport->senoclock_status = 'failed';
+            $labReport->save();
+        }
+    }
+
+    /**
+     * Step 1 – Upload PDF file to Senoclock File Upload endpoint.
+     */
+    public function uploadPdfToSenoclock(string $filePath, string $token): ?string
+    {
+        if (!file_exists($filePath)) {
+            Log::error("Senoclock AI upload: file not found at {$filePath}");
+            return null;
+        }
+
+        $baseUrl = rtrim((string) config('services.senoclock.base_url'), '/');
+        $url = "{$baseUrl}/dl-api/file-upload/";
+
+        $response = Http::withoutVerifying()->withToken($token)
+            ->attach('file', file_get_contents($filePath), basename($filePath))
+            ->put($url, [
+                'process_execute' => 'true',
+                'diet_preference' => 'non_veg',
+                'preferred_language' => 'en'
+            ]);
+
+        if (!$response->successful()) {
+            Log::error("Senoclock AI upload failed: " . $response->body());
+            return null;
+        }
+
+        $fileId = $response->json('id');
+        if (empty($fileId)) {
+            Log::error("Senoclock AI upload response missing ID: " . $response->body());
+            return null;
+        }
+
+        return $fileId;
+    }
+
+    /**
+     * Step 2 – Convert application biomarkers format dynamically to Senoclock expected format.
+     */
+    public function convertBiomarkersToSenoclockFormat(array $extractedBiomarkers): array
+    {
+        $mapping = [
+            'hdl cholesterol' => 'HDL',
+            'ldl cholesterol' => 'LDL',
+            'triglycerides' => 'TRIG',
+            'blood sugar (fasting)' => 'GLC',
+            'blood glucose (fasting)' => 'GLC',
+            'hba1c' => 'HGBA1C',
+            'sgpt' => 'ALT',
+            'sgot' => 'AST',
+            'c-reactive protein' => 'CRP',
+            'creatinine' => 'CREA',
+            'albumin' => 'ALB',
+            'ggt' => 'GGT',
+            'platelet count' => 'PLT',
+            'total wbc count' => 'WBC',
+            'sodium' => 'NA+',
+            'potassium' => 'K+',
+            // Extra standard/common variations
+            'hdl' => 'HDL',
+            'ldl' => 'LDL',
+            'tg' => 'TRIG',
+            'trig' => 'TRIG',
+            'glucose' => 'GLC',
+            'glc' => 'GLC',
+            'alt' => 'ALT',
+            'ast' => 'AST',
+            'crp' => 'CRP',
+            'crea' => 'CREA',
+            'creatine' => 'CREA',
+            'alb' => 'ALB',
+            'plt' => 'PLT',
+            'wbc' => 'WBC',
+            'na+' => 'NA+',
+            'k+' => 'K+',
+            'na' => 'NA+',
+            'k' => 'K+',
+        ];
+
+        $markers = [];
+
+        foreach ($extractedBiomarkers as $biomarker) {
+            if (!is_array($biomarker) || empty($biomarker['name'])) {
+                continue;
+            }
+
+            $name = strtolower(trim($biomarker['name']));
+            
+            // Look up in the mapping
+            $matchedKey = null;
+            if (isset($mapping[$name])) {
+                $matchedKey = $mapping[$name];
+            } else {
+                // Try fuzzy lookup (e.g. if the name contains the mapping key or vice versa)
+                foreach ($mapping as $mapKey => $senoKey) {
+                    if ($mapKey === $name || str_contains($name, $mapKey) || str_contains($mapKey, $name)) {
+                        $matchedKey = $senoKey;
+                        break;
+                    }
+                }
+            }
+
+            if ($matchedKey) {
+                $value = $biomarker['value'] ?? null;
+                if ($value !== null && $value !== '') {
+                    // Clean up and format value as float/int if numeric
+                    if (is_numeric($value)) {
+                        $value = str_contains((string)$value, '.') ? (float)$value : (int)$value;
+                    }
+
+                    $markers[$matchedKey] = [
+                        'value' => $value,
+                        'unit' => $biomarker['unit'] ?? null,
+                        'range' => $biomarker['range'] ?? null,
+                    ];
+                }
+            }
+        }
+
+        return $markers;
+    }
+
+    /**
+     * Step 3 – Execute the Senoclock Analysis.
+     */
+    public function executeSenoclockAnalysis(string $fileId, array $payload, string $token): ?array
+    {
+        $baseUrl = rtrim((string) config('services.senoclock.base_url'), '/');
+        $url = "{$baseUrl}/dl-api/file-execute/";
+
+        $response = Http::withoutVerifying()->withToken($token)
+            ->post($url, $payload);
+
+        if (!$response->successful()) {
+            Log::error("Senoclock AI execute failed: " . $response->body(), ['payload' => $payload]);
+            return null;
+        }
+
+        return $response->json();
+    }
+
+    /**
+     * Step 4 – Download generated PDF report.
+     */
+    public function downloadAndSaveSenoclockReport(string $reportId, string $token): ?string
+    {
+        $baseUrl = rtrim((string) config('services.senoclock.base_url'), '/');
+        $url = "{$baseUrl}/dl-api/report/download/?pdf_report=true&id=" . $reportId;
+
+        $response = Http::withoutVerifying()->withToken($token)->get($url);
+
+        if (!$response->successful()) {
+            Log::error("Senoclock AI download PDF report failed: " . $response->body());
+            return null;
+        }
+
+        $contentType = $response->header('Content-Type');
+        if (strpos($contentType, 'application/json') !== false) {
+            Log::error("Senoclock AI download PDF report returned JSON (processing?): " . $response->body());
+            return null;
+        }
+
+        $fileName = "senoclock_{$reportId}.pdf";
+        $uploadDir = public_path('uploads');
+        if (!file_exists($uploadDir)) {
+            @mkdir($uploadDir, 0777, true);
+        }
+
+        $filePath = $uploadDir . '/' . $fileName;
+        file_put_contents($filePath, $response->body());
+
+        return 'uploads/' . $fileName;
     }
 }
