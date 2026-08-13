@@ -1,0 +1,292 @@
+{
+	"info": {
+		"_postman_id": "7b8f9e6b-cf88-4680-928d-128ff3a89047",
+		"name": "MulkMed Local MajorOrganTest & Senoclock APIs",
+		"description": "Postman collection to test MajorOrganTest and SenoClock integrations locally.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Local MulkMed Proxy APIs",
+			"item": [
+				{
+					"name": "Major Organ Test - Analyze Report",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "apikey",
+								"value": "123",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "user_id",
+									"value": "350",
+									"type": "text"
+								},
+								{
+									"key": "external_id",
+									"value": "350",
+									"type": "text"
+								},
+								{
+									"key": "image2",
+									"description": "Upload a PDF or image report file here",
+									"type": "file"
+								},
+								{
+									"key": "document",
+									"description": "Fallback file field name",
+									"type": "file"
+								},
+								{
+									"key": "age",
+									"value": "25",
+									"type": "text"
+								},
+								{
+									"key": "gender",
+									"value": "male",
+									"type": "text"
+								},
+								{
+									"key": "dob",
+									"value": "2001-01-01",
+									"type": "text"
+								},
+								{
+									"key": "test_date",
+									"value": "2026-05-27",
+									"type": "text"
+								},
+								{
+									"key": "markers",
+									"value": "[\n  {\n    \"name\": \"Triglycerides\",\n    \"matched_biomarkers\": [\n      {\n        \"value\": 86,\n        \"unit\": \"mg/dL\",\n        \"reference_range\": \"0-150\"\n      }\n    ]\n  }\n]",
+									"type": "text"
+								},
+								{
+									"key": "ocr_text",
+									"value": "",
+									"type": "text"
+								}
+							]
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/majorOrganTests/analyzeReport",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"majorOrganTests",
+								"analyzeReport"
+							]
+						},
+						"description": "Uploads a lab report PDF/image to extract biomarkers and trigger background Senoclock integration."
+					},
+					"response": []
+				},
+				{
+					"name": "Major Organ Test - Generate Senoclock Report",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "apikey",
+								"value": "123",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"lab_report_id\": 47\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/majorOrganTests/generateSenoclockReport",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"majorOrganTests",
+								"generateSenoclockReport"
+							]
+						},
+						"description": "Downloads the generated Senoclock PDF report for a given lab_report_id or senoclock_id. If not generated yet, it will generate it synchronously."
+					},
+					"response": []
+				},
+				{
+					"name": "New Shenai Care - Trigger Classification (Proxy)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "apikey",
+								"value": "123",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"age\": 25,\n  \"sex\": \"male\",\n  \"scan_date\": \"2026-05-27\",\n  \"Body Fat %\": 25.4,\n  \"NAFLD Risk\": \"Medium\",\n  \"Stress Index\": 3.3,\n  \"Vascular Age\": 26,\n  \"patient_name\": \"Test User\",\n  \"Diabetes Risk\": 2.5,\n  \"Blood Pressure\": {\n    \"systolic\": 121,\n    \"diastolic\": 78\n  },\n  \"Breathing Rate\": 34,\n  \"Wellness Score\": 80,\n  \"Heart Rate (HR)\": 84.18,\n  \"Cardiac Workload\": 70,\n  \"Hypertension Risk\": 2.1,\n  \"Conicity Index (CI)\": 1.0,\n  \"Body Mass Index (BMI)\": 25.4,\n  \"Parasympathetic Activity\": 30,\n  \"A Body Shape Index (ABSI)\": 0.078,\n  \"Basal Metabolic Rate (BMR)\": 1650,\n  \"Body Roundness Index (BRI)\": 3.2,\n  \"Cardiovascular Disease Risk\": 2.5,\n  \"Hard and Fatal Events Risks\": 1.5,\n  \"Heart Rate Variability (HRV)\": 70,\n  \"Waist-to-Height Ratio (WHtR)\": 0.48,\n  \"Total Daily Energy Expenditure (TDEE)\": 2200,\n  \"Cardiovascular Risk Score (Framingham FRS)\": 3.8,\n  \"oxygenSaturation\": 16.5,\n  \"temperature\": 25.4,\n  \"confidence\": 0.8,\n  \"averageSignalQuality\": 0.8,\n  \"bmiCategory\": \"overweight\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/newshenai-care/trigger-classification",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"newshenai-care",
+								"trigger-classification"
+							]
+						},
+						"description": "Proxies classification payload to SenoClock API through local server using .env configured auth."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Direct SenoClock APIs",
+			"item": [
+				{
+					"name": "SenoClock - Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.token || jsonData.key || jsonData.access_token) {",
+									"    pm.environment.set(\"senoclock_token\", jsonData.token || jsonData.key || jsonData.access_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"coo@mulkhealthcare.com\",\n    \"password\": \"2py1.13@3d7E387C\"\n}"
+						},
+						"url": {
+							"raw": "{{senoclock_base_url}}/rest-auth/login/",
+							"host": [
+								"{{senoclock_base_url}}"
+							],
+							"path": [
+								"rest-auth",
+								"login",
+								""
+							]
+						},
+						"description": "Logs in directly to Senoclock AI service to obtain Bearer auth token."
+					},
+					"response": []
+				},
+				{
+					"name": "SenoClock - Trigger Classification",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{senoclock_token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"age\": 25,\n  \"sex\": \"male\",\n  \"scan_date\": \"2026-05-27\",\n  \"Body Fat %\": 25.4,\n  \"NAFLD Risk\": \"Medium\",\n  \"Stress Index\": 3.3,\n  \"Vascular Age\": 26,\n  \"patient_name\": \"Test User\",\n  \"Diabetes Risk\": 2.5,\n  \"Blood Pressure\": {\n    \"systolic\": 121,\n    \"diastolic\": 78\n  },\n  \"Breathing Rate\": 34,\n  \"Wellness Score\": 80,\n  \"Heart Rate (HR)\": 84.18,\n  \"Cardiac Workload\": 70,\n  \"Hypertension Risk\": 2.1,\n  \"Conicity Index (CI)\": 1.0,\n  \"Body Mass Index (BMI)\": 25.4,\n  \"Parasympathetic Activity\": 30,\n  \"A Body Shape Index (ABSI)\": 0.078,\n  \"Basal Metabolic Rate (BMR)\": 1650,\n  \"Body Roundness Index (BRI)\": 3.2,\n  \"Cardiovascular Disease Risk\": 2.5,\n  \"Hard and Fatal Events Risks\": 1.5,\n  \"Heart Rate Variability (HRV)\": 70,\n  \"Waist-to-Height Ratio (WHtR)\": 0.48,\n  \"Total Daily Energy Expenditure (TDEE)\": 2200,\n  \"Cardiovascular Risk Score (Framingham FRS)\": 3.8,\n  \"oxygenSaturation\": 16.5,\n  \"temperature\": 25.4,\n  \"confidence\": 0.8,\n  \"averageSignalQuality\": 0.8,\n  \"bmiCategory\": \"overweight\"\n}"
+						},
+						"url": {
+							"raw": "{{senoclock_base_url}}/dl-api/mulkmed/trigger-classification/",
+							"host": [
+								"{{senoclock_base_url}}"
+							],
+							"path": [
+								"dl-api",
+								"mulkmed",
+								"trigger-classification",
+								""
+							]
+						},
+						"description": "Trigger classification directly on Senoclock servers using the authenticated Bearer token."
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"event": [],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "senoclock_base_url",
+			"value": "https://api-euc1.senoclock.ai",
+			"type": "string"
+		}
+	]
+}
