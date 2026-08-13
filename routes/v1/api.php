@@ -338,6 +338,7 @@ use App\Http\Controllers\v1\PatientEmrReportController;
         Route::post('generateSenoclockReport', [MajorOrganTestController::class, 'generateSenoclockReport'])->middleware('checkHeader')->name('generateSenoclockReport');
         Route::post('saveSelection', [MajorOrganTestController::class, 'saveSelection'])->middleware('checkHeader')->name('saveSelection');
         Route::get('getSelection', [MajorOrganTestController::class, 'getSelection'])->middleware('checkHeader')->name('getSelection');
+        Route::get('downloadSenoclockReport/{id}', [MajorOrganTestController::class, 'downloadSenoclockReport'])->name('downloadSenoclockReport');
  
   
     });

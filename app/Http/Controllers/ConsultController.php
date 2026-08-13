@@ -484,6 +484,11 @@ class ConsultController extends Controller
     // FCM Send Function
     public function sendNotification($token,$consultId=null,$imageUrl = null,$touristId = null, $appointmentdate = null, $appointmentTime = null,$appointmentID = null )
     {
+        if (config('app.env') !== 'production') {
+            \Log::info('FCM notification skipped in non-production environment for token: ' . $token);
+            return;
+        }
+
         $messaging = app('firebase.messaging');
    
         if (!$token) return;
@@ -815,6 +820,11 @@ class ConsultController extends Controller
 
     public function sendNotificationToCustomer($token,$consultId=null,$imageUrl = null,$touristId = null, $appointmentdate = null, $appointmentTime = null,$appointmentID = null,$touristLink=null,$tourist_link=null )
     {
+        if (config('app.env') !== 'production') {
+            \Log::info('FCM notification to customer skipped in non-production environment for token: ' . $token);
+            return;
+        }
+
         $messaging = app('firebase.messaging');
    
         if (!$token) return;

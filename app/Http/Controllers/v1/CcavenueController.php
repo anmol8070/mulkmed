@@ -220,7 +220,7 @@ class CcavenueController extends Controller
 
 // Regards,
 // Team Mulk Med";          
-$message = "Appointment: {$userAppointmentDate} at {$userAppointmentTime}. Join:here{$patient_link_mail}";
+$message = "Appointment: {$userAppointmentDate} at {$userAppointmentTime}. Join:here {$patient_link_mail}";
                 $result = EmailHelpers::sendSms($cleanCode . $user->phone_number, $message);
                 Log::info('BOOKING_TRACE v1 flow-1 user sms triggered', [
                     'appointment_id' => $appointment->id,
@@ -658,7 +658,7 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
 // Regards,
 // Team Mulk Med";       
 
-$message = "Appointment: {$userAppointmentDate} at {$userAppointmentTime}. Join:here{$patient_link_mail}";
+$message = "Appointment: {$userAppointmentDate} at {$userAppointmentTime}. Join:here {$patient_link_mail}";
 
                 $result = EmailHelpers::sendSms($cleanCode . $user->phone_number, $message);
                 Log::info('BOOKING_TRACE v1 flow-2 user sms triggered', [
@@ -2222,7 +2222,7 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
 
 // Regards,
 // Team Mulk Med";          
-                $message = "Appointment: {$userAppointmentDate} at {$userAppointmentTime}. Join:here{$patient_link_mail}";
+                $message = "Appointment: {$userAppointmentDate} at {$userAppointmentTime}. Join:here {$patient_link_mail}";
 
                 $result = EmailHelpers::sendSms($cleanCode . $user->phone_number, $message);
                 Log::info('BOOKING_TRACE v1 flow-3 user sms triggered', [

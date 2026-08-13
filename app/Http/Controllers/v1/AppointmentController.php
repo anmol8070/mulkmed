@@ -613,6 +613,14 @@ class AppointmentController extends Controller
         }
         $meeting->save();
 
+        if ($meeting->doctor_joined && $meeting->user_joined) {
+            $appointment = Appointments::find($meeting->appointment_id);
+            if ($appointment && $appointment->status == Constants::orderAccepted) {
+                $appointment->status = Constants::orderCompleted;
+                $appointment->save();
+            }
+        }
+
         // if($appointment && $appointment->status == Constants::orderCompleted){
         //     return view('meetings.meeting_message', ['message' => "Appointment is Already Completed"]);
         // }
@@ -1360,7 +1368,7 @@ class AppointmentController extends Controller
                 ->Where('doctor_id', $appointment->doctor_id)
                 ->Where('payment_status',1)
                 ->WhereNotIn('id', [$appointment->id])
-                ->WhereIn('status', [Constants::orderCompleted, Constants::orderCancelled, Constants::orderDeclined])
+                ->WhereIn('status', [Constants::orderCompleted, Constants::orderCancelled, Constants::orderDeclined, Constants::orderMissed])
                 ->orderByDesc('id')
                 ->get();
 
@@ -2574,7 +2582,7 @@ class AppointmentController extends Controller
                 ->Where('doctor_id', $request->doctor_id)
                 ->WhereNotIn('id', [$appointment->id])
                 ->Where('payment_status',1)
-                ->WhereIn('status', [Constants::orderCompleted, Constants::orderCancelled, Constants::orderDeclined])
+                ->WhereIn('status', [Constants::orderCompleted, Constants::orderCancelled, Constants::orderDeclined, Constants::orderMissed])
                 ->where('status', Constants::orderPlacedPending)
                 ->get();
 
@@ -2620,13 +2628,35 @@ class AppointmentController extends Controller
             ->get();
 
         foreach ($result as $appointment) {
+            if (in_array($appointment->status, [Constants::orderPlacedPending, Constants::orderAccepted])) {
+                $formattedTime = GlobalFunction::formateTimeString($appointment->time);
+                if ($formattedTime) {
+                    $appointmentDateTime = \Carbon\Carbon::parse($appointment->date . ' ' . $formattedTime);
+
+                    $hasJoined = \Illuminate\Support\Facades\DB::table('jitsi_meetings')
+                        ->where('appointment_id', $appointment->id)
+                        ->where(function($query) {
+                            $query->where('doctor_joined', 1)->orWhere('user_joined', 1);
+                        })
+                        ->exists();
+
+                    if ($appointmentDateTime->copy()->addHour()->isPast() && $appointment->created_at->copy()->addHour()->isPast()) {
+                        if (!$hasJoined) {
+                            $appointment->status = Constants::orderMissed;
+                        } else {
+                            $appointment->status = Constants::orderCompleted;
+                        }
+                        $appointment->save();
+                    }
+                }
+            }
             $appointment->previous_appointments =
                 Appointments::with(['user', 'patient', 'doctor', 'documents', 'prescription', 'rating'])
                 ->Where('doctor_id', $request->doctor_id)
                 ->Where('user_id', $appointment->user_id)
                 ->Where('payment_status',1)
                 ->WhereNotIn('id', [$appointment->id])
-                ->WhereIn('status', [Constants::orderCompleted, Constants::orderCancelled, Constants::orderDeclined])
+                ->WhereIn('status', [Constants::orderCompleted, Constants::orderCancelled, Constants::orderDeclined, Constants::orderMissed])
                 ->get();
         }
 
@@ -2666,7 +2696,7 @@ class AppointmentController extends Controller
                 ->Where('user_id', $appointment->user_id)
                 ->WhereNotIn('id', [$appointment->id])
                 ->Where('payment_status',1)
-                ->WhereIn('status', [Constants::orderCompleted, Constants::orderCancelled, Constants::orderDeclined])
+                ->WhereIn('status', [Constants::orderCompleted, Constants::orderCancelled, Constants::orderDeclined, Constants::orderMissed])
                 ->where('status', Constants::orderPlacedPending)
                 ->get();
 

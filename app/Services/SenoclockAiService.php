@@ -593,11 +593,127 @@ class SenoclockAiService
             $analysisResponse = $labReport->analysis_response;
             $extractedBiomarkers = $analysisResponse['extracted_biomarkers'] ?? [];
 
-            $senoclockMarkers = $this->convertBiomarkersToSenoclockFormat($availableBiomarkers, $extractedBiomarkers);
-            if (empty($senoclockMarkers)) {
-                $senoclockMarkers = $this->convertBiomarkersToSenoclockFormat($extractedBiomarkers);
+            $availableCount = $labReport->available_count ?? count($availableBiomarkers);
+
+            // Case 4: available_count is 0
+            if ($availableCount === 0) {
+                Log::warning("Senoclock AI integration skipped: available_count is 0 for LabReport #{$labReport->id}");
+                $labReport->senoclock_status = 'failed';
+                $labReport->save();
+                return;
             }
 
+            // 1. Extract ALL markers from the report
+            $extractedMarkers = $this->convertBiomarkersToSenoclockFormat($extractedBiomarkers);
+            if (empty($extractedMarkers) && !empty($labReport->ocr_text)) {
+                $analyzerService = app(\App\Services\LabReportBiomarkerAnalyzerService::class);
+                $extractedMarkers = $analyzerService->extractSenoclockMarkersWithOpenAi($labReport->ocr_text);
+            }
+
+            // Case 3: No matching markers in extraction
+            if (empty($extractedMarkers)) {
+                Log::warning("Senoclock AI integration failed: No markers extracted from report for LabReport #{$labReport->id}");
+                $labReport->senoclock_status = 'failed';
+                $labReport->save();
+                return;
+            }
+
+            // 2. Determine "available" markers based on business logic
+            $availableKeys = $this->getExpectedSenoclockKeys($availableBiomarkers);
+
+            Log::info('SenoclockService: Available markers from analyzeReport', [
+                'available_count' => $availableCount,
+                'available_test_count' => count($availableBiomarkers),
+                'available_markers' => $availableKeys,
+                'available_marker_count' => count($availableKeys),
+            ]);
+
+            $mapping = $this->getSenoclockMapping();
+            $normalizedExtractedMarkers = [];
+            foreach ($extractedMarkers as $rawKey => $markerData) {
+                $mKey = $this->findSenoclockKey($rawKey, $mapping);
+                $finalKey = $mKey ?: strtoupper(trim($rawKey));
+                // Only take the first one if there are duplicates
+                if (!isset($normalizedExtractedMarkers[$finalKey])) {
+                    $normalizedExtractedMarkers[$finalKey] = $markerData;
+                }
+            }
+
+            // 3. Filter markers (Intersection)
+            $filteredMarkers = [];
+            foreach ($availableKeys as $markerKey) {
+                if (isset($normalizedExtractedMarkers[$markerKey])) {
+                    $filteredMarkers[$markerKey] = $normalizedExtractedMarkers[$markerKey];
+                }
+            }
+            
+            $filteredMarkerCount = count($filteredMarkers);
+
+            Log::info('SenoclockService: Final marker filtering', [
+                'extracted_marker_count' => count($extractedMarkers),
+                'normalized_extracted_markers' => array_keys($normalizedExtractedMarkers),
+                'available_marker_count' => count($availableKeys),
+                'filtered_marker_count' => count($filteredMarkers),
+                'sent_markers' => array_keys($filteredMarkers),
+            ]);
+
+            // 4. Validate before execution
+            if ($availableCount > 0 && empty($filteredMarkers)) {
+                Log::error('SenoclockService: No matching available markers found', [
+                    'available_count' => $availableCount,
+                    'available_markers' => $availableKeys,
+                    'extracted_markers' => array_keys($extractedMarkers),
+                ]);
+                $labReport->senoclock_status = 'failed';
+                $labReport->save();
+                return; // Stop execution to prevent file-execute with empty markers
+            }
+
+            // APP BUSINESS RULE: Minimum 16 markers required for report generation
+            if ($filteredMarkerCount < 16) {
+                Log::warning('SenoclockService: Insufficient markers for report generation', [
+                    'available_marker_count' => count($availableKeys),
+                    'extracted_marker_count' => count($extractedMarkers),
+                    'filtered_marker_count' => $filteredMarkerCount,
+                    'required_marker_count' => 16,
+                    'sent_markers' => array_keys($filteredMarkers),
+                ]);
+                $labReport->senoclock_status = 'failed';
+                $labReport->save();
+                return; // Stop execution
+            }
+
+            // Fix the Logging to exact acceptance criteria
+            Log::info('SenoclockService: Report generation eligibility', [
+                'extracted_marker_count' => count($extractedMarkers),
+                'available_marker_count' => count($availableKeys),
+                'filtered_marker_count' => $filteredMarkerCount,
+                'minimum_required_for_app' => 16,
+                'senoclock_minimum_required' => 15,
+                'eligible' => $filteredMarkerCount >= 16,
+                'markers' => array_keys($filteredMarkers),
+            ]);
+
+            Log::info('SenoclockService: Marker filtering result', [
+                'available_count' => $availableCount,
+                'available_test_count' => count($availableBiomarkers),
+                'available_marker_count' => count($availableKeys),
+                'extracted_marker_count' => count($extractedMarkers),
+                'filtered_marker_count' => count($filteredMarkers),
+                'available_markers' => $availableKeys,
+                'extracted_markers' => array_keys($extractedMarkers),
+                'sent_markers' => array_keys($filteredMarkers),
+                'excluded_markers' => array_values(
+                    array_diff(
+                        array_keys($extractedMarkers),
+                        array_keys($filteredMarkers)
+                    )
+                ),
+            ]);
+
+            // Ensure no later code replaces $filteredMarkers
+            $senoclockMarkers = $filteredMarkers;
+            
             // Step 3: Execute Senoclock Analysis
             $user = Users::find($labReport->user_id);
             $dob = null;
@@ -712,50 +828,272 @@ class SenoclockAiService
     }
 
     /**
+     * Get the standard mapping for Senoclock biomarkers.
+     */
+    public function getSenoclockMapping(): array
+    {
+        return [
+            // AAMY - Alpha-Amylase
+            'alpha-amylase' => 'AAMY',
+            'aamy' => 'AAMY',
+            
+            // AFP - Alpha Fetoprotein
+            'alpha fetoprotein' => 'AFP',
+            'afp' => 'AFP',
+            
+            // ALB - Albumin
+            'albumin' => 'ALB',
+            'alb' => 'ALB',
+            
+            // ALP - Alkaline Phosphatase
+            'alkaline phosphatase' => 'ALP',
+            'alp' => 'ALP',
+            
+            // ALT - Alanine Transaminase
+            'alanine transaminase' => 'ALT',
+            'sgpt' => 'ALT',
+            'alt' => 'ALT',
+            
+            // AST - Aspartate Transaminase
+            'aspartate transaminase' => 'AST',
+            'sgot' => 'AST',
+            'ast' => 'AST',
+            
+            // ATLYMPH - Atypical lymphocytes
+            'atypical lymphocytes' => 'ATLYMPH',
+            'atlymph' => 'ATLYMPH',
+            
+            // BASO% - Basophils,%
+            'basophils,%' => 'BASO%',
+            'basophils' => 'BASO%',
+            'baso' => 'BASO%',
+            'baso%' => 'BASO%',
+            
+            // BILID - Direct Bilirubin
+            'direct bilirubin' => 'BILID',
+            'bilid' => 'BILID',
+            
+            // BILIT - Total Bilirubin
+            'total bilirubin' => 'BILIT',
+            'bilit' => 'BILIT',
+            
+            // BUN - Blood Urea Nitrogen
+            'blood urea nitrogen' => 'BUN',
+            'blood urea nitrogen (bun)' => 'BUN',
+            'bun' => 'BUN',
+            
+            // CA - Calcium
+            'calcium' => 'CA',
+            'ca' => 'CA',
+            
+            // CHOLT - Total Cholesterol
+            'total cholesterol' => 'CHOLT',
+            'cholesterol' => 'CHOLT',
+            'cholt' => 'CHOLT',
+            
+            // CL - Chloride
+            'chloride' => 'CL',
+            'cl' => 'CL',
+            
+            // CREA - Creatinine
+            'creatinine' => 'CREA',
+            'serum creatinine' => 'CREA',
+            'crea' => 'CREA',
+            
+            // EOS% - Eosinophils,%
+            'eosinophils,%' => 'EOS%',
+            'eosinophils' => 'EOS%',
+            'eos' => 'EOS%',
+            'eos%' => 'EOS%',
+            
+            // ESR - Erythrocyte Sedimentation Rate
+            'erythrocyte sedimentation rate' => 'ESR',
+            'esr' => 'ESR',
+            
+            // FERR - Ferritin
+            'ferritin' => 'FERR',
+            'ferr' => 'FERR',
+            
+            // GGT - Gamma-GT
+            'gamma-gt' => 'GGT',
+            'ggt' => 'GGT',
+            
+            // GLOBT - Total Globulin
+            'total globulin' => 'GLOBT',
+            'globulin' => 'GLOBT',
+            'globt' => 'GLOBT',
+            
+            // GLC - Glucose
+            'glucose' => 'GLC',
+            'blood sugar (fasting)' => 'GLC',
+            'blood glucose (fasting)' => 'GLC',
+            'glc' => 'GLC',
+            
+            // HCT - Hematocrit
+            'hematocrit' => 'HCT',
+            'hct' => 'HCT',
+            
+            // HDL - HDL Cholestrol
+            'hdl cholestrol' => 'HDL',
+            'hdl cholesterol' => 'HDL',
+            'hdl' => 'HDL',
+            
+            // HGB - Hemoglobin
+            'hemoglobin' => 'HGB',
+            'hemoglobin (hb)' => 'HGB',
+            'hb' => 'HGB',
+            'hgb' => 'HGB',
+            
+            // HGBA1C - Hemoglobin A1c
+            'hemoglobin a1c' => 'HGBA1C',
+            'hba1c' => 'HGBA1C',
+            'hgba1c' => 'HGBA1C',
+            
+            // IRON - Iron
+            'iron' => 'IRON',
+            
+            // K+ - Potassium
+            'potassium' => 'K+',
+            'k' => 'K+',
+            'k+' => 'K+',
+            
+            // LDL - LDL Cholesterol
+            'ldl cholesterol' => 'LDL',
+            'ldl' => 'LDL',
+            
+            // LYMPH% - Lymphocytes,%
+            'lymphocytes,%' => 'LYMPH%',
+            'lymphocytes' => 'LYMPH%',
+            'lymph' => 'LYMPH%',
+            'lymph%' => 'LYMPH%',
+            
+            // MCH - Mean Corpuscular Haemoglobin
+            'mean corpuscular haemoglobin' => 'MCH',
+            'mch' => 'MCH',
+            
+            // MCHC - Mean Corpuscular Haemoglobin Concentration
+            'mean corpuscular haemoglobin concentration' => 'MCHC',
+            'mchc' => 'MCHC',
+            
+            // MCV - Mean Corpuscular Volume
+            'mean corpuscular volume' => 'MCV',
+            'mcv' => 'MCV',
+            
+            // MONO% - Monocytes,%
+            'monocytes,%' => 'MONO%',
+            'monocytes' => 'MONO%',
+            'mono' => 'MONO%',
+            'mono%' => 'MONO%',
+            
+            // MPV - Mean Platelet Volume
+            'mean platelet volume' => 'MPV',
+            'mpv' => 'MPV',
+            
+            // NA+ - Sodium
+            'sodium' => 'NA+',
+            'na' => 'NA+',
+            'na+' => 'NA+',
+            
+            // NEUTR% - Neutrophils,%
+            'neutrophils,%' => 'NEUTR%',
+            'neutrophils' => 'NEUTR%',
+            'neutr' => 'NEUTR%',
+            'neutr%' => 'NEUTR%',
+            
+            // P - Phosphorous
+            'phosphorous' => 'P',
+            'p' => 'P',
+            
+            // PDW - Platelet Distribution Width
+            'platelet distribution width' => 'PDW',
+            'pdw' => 'PDW',
+            
+            // PLT - Platelets
+            'platelets' => 'PLT',
+            'platelet count' => 'PLT',
+            'plt' => 'PLT',
+            
+            // PROT - Total Protein
+            'total protein' => 'PROT',
+            'prot' => 'PROT',
+            
+            // RBC - Red Blood Cell
+            'red blood cell' => 'RBC',
+            'rbc count' => 'RBC',
+            'rbc' => 'RBC',
+            
+            // RDW - Red Cell Distribution Width
+            'red cell distribution width' => 'RDW',
+            'rdw' => 'RDW',
+            
+            // TRIG - Triglycerides
+            'triglycerides' => 'TRIG',
+            'trig' => 'TRIG',
+            'tg' => 'TRIG',
+            
+            // UA - Uric Acid
+            'uric acid' => 'UA',
+            'ua' => 'UA',
+            
+            // WBC - White Blood Cell
+            'white blood cell' => 'WBC',
+            'total wbc count' => 'WBC',
+            'wbc count' => 'WBC',
+            'wbc' => 'WBC',
+            
+            // CRP - C-reactive protein
+            'c-reactive protein' => 'CRP',
+            'c-reactive protein (crp)' => 'CRP',
+            'crp' => 'CRP',
+            
+            // VIT-D - Vitamin D
+            'vitamin d' => 'VIT-D',
+            'vit-d' => 'VIT-D',
+            
+            // PTH - Parathyroid hormone
+            'parathyroid hormone' => 'PTH',
+            'thyroid stimulating hormone' => 'TSH', // TSH is generally used instead of PTH sometimes but PTH is Parathyroid
+            'pth' => 'PTH',
+            'tsh' => 'TSH',
+            
+            // APOB - Apolipoprotein B
+            'apolipoprotein b' => 'APOB',
+            'apob' => 'APOB',
+            
+            // LDH - Lactate Dehydrogenase
+            'lactate dehydrogenase' => 'LDH',
+            'ldh' => 'LDH',
+            
+            // MG+ - Magnesium
+            'magnesium' => 'MG+',
+            'mg' => 'MG+',
+            'mg+' => 'MG+',
+            
+            // GFR - Glomerular Filtration Rate
+            'glomerular filtration rate' => 'GFR',
+            'gfr' => 'GFR',
+            
+            // IGF-1 - Insulin-like Growth Factor-1
+            'insulin-like growth factor-1' => 'IGF-1',
+            'igf-1' => 'IGF-1',
+            
+            // C-PEPTIDE - Connecting peptide
+            'connecting peptide' => 'C-PEPTIDE',
+            'c-peptide' => 'C-PEPTIDE',
+        ];
+    }
+
+    /**
      * Step 2 – Convert application biomarkers format dynamically to Senoclock expected format.
      */
     public function convertBiomarkersToSenoclockFormat(array $availableBiomarkers, array $extractedBiomarkers = []): array
     {
-        $mapping = [
-            'hdl cholesterol' => 'HDL',
-            'ldl cholesterol' => 'LDL',
-            'triglycerides' => 'TRIG',
-            'blood sugar (fasting)' => 'GLC',
-            'blood glucose (fasting)' => 'GLC',
-            'hba1c' => 'HGBA1C',
-            'sgpt' => 'ALT',
-            'sgot' => 'AST',
-            'c-reactive protein' => 'CRP',
-            'creatinine' => 'CREA',
-            'albumin' => 'ALB',
-            'ggt' => 'GGT',
-            'platelet count' => 'PLT',
-            'total wbc count' => 'WBC',
-            'sodium' => 'NA+',
-            'potassium' => 'K+',
-            // Extra standard/common variations
-            'hdl' => 'HDL',
-            'ldl' => 'LDL',
-            'tg' => 'TRIG',
-            'trig' => 'TRIG',
-            'glucose' => 'GLC',
-            'glc' => 'GLC',
-            'alt' => 'ALT',
-            'ast' => 'AST',
-            'crp' => 'CRP',
-            'crea' => 'CREA',
-            'creatine' => 'CREA',
-            'alb' => 'ALB',
-            'plt' => 'PLT',
-            'wbc' => 'WBC',
-            'na+' => 'NA+',
-            'k+' => 'K+',
-            'na' => 'NA+',
-            'k' => 'K+',
-        ];
+        $mapping = $this->getSenoclockMapping();
 
         $extractedMap = [];
+        $extractedSenoclockMap = [];
         foreach ($extractedBiomarkers as $extracted) {
+            $normName = '';
             if (is_array($extracted) && !empty($extracted['name'])) {
                 $normName = strtolower(trim($extracted['name']));
                 $extractedMap[$normName] = $extracted;
@@ -768,6 +1106,13 @@ class SenoclockAiService
                     'range' => null,
                 ];
             }
+
+            if ($normName !== '') {
+                $sKey = $this->findSenoclockKey($normName, $mapping);
+                if ($sKey) {
+                    $extractedSenoclockMap[$sKey] = $extractedMap[$normName];
+                }
+            }
         }
 
         $markers = [];
@@ -778,38 +1123,56 @@ class SenoclockAiService
             }
 
             $biomarkerName = strtolower(trim($biomarker['name'] ?? ''));
+            $matchedKeys = [];
             
             // Check if the item itself matches a Senoclock marker directly
             $matchedKey = $this->findSenoclockKey($biomarkerName, $mapping);
             if ($matchedKey) {
-                $valObj = $this->extractValUnitRange($biomarker, $extractedMap);
-                if ($valObj) {
-                    $markers[$matchedKey] = $valObj;
-                }
+                $matchedKeys[] = $matchedKey;
             }
 
             // Check the nested matched_biomarkers list
             if (!empty($biomarker['matched_biomarkers']) && is_array($biomarker['matched_biomarkers'])) {
                 foreach ($biomarker['matched_biomarkers'] as $match) {
-                    if (is_string($match)) {
-                        $matchNorm = strtolower(trim($match));
-                        $matchedKey = $this->findSenoclockKey($matchNorm, $mapping);
-                        if ($matchedKey && isset($extractedMap[$matchNorm])) {
-                            $valObj = $this->extractValUnitRange($extractedMap[$matchNorm], $extractedMap);
-                            if ($valObj) {
-                                $markers[$matchedKey] = $valObj;
-                            }
-                        }
-                    } elseif (is_array($match)) {
-                        $matchName = !empty($match['name']) ? strtolower(trim($match['name'])) : $biomarkerName;
-                        $matchedKey = $this->findSenoclockKey($matchName, $mapping);
-                        if ($matchedKey) {
-                            $valObj = $this->extractValUnitRange($match, $extractedMap);
-                            if ($valObj) {
-                                $markers[$matchedKey] = $valObj;
-                            }
+                    $matchName = is_array($match) ? ($match['name'] ?? '') : $match;
+                    if (!empty($matchName)) {
+                        $mKey = $this->findSenoclockKey(strtolower(trim($matchName)), $mapping);
+                        if ($mKey) {
+                            $matchedKeys[] = $mKey;
                         }
                     }
+                }
+            }
+
+            $matchedKeys = array_unique($matchedKeys);
+
+            if (empty($matchedKeys) && !empty($biomarkerName)) {
+                $sanitizedKey = strtoupper(preg_replace('/[^a-zA-Z0-9]+/', '_', trim($biomarkerName)));
+                $sanitizedKey = trim($sanitizedKey, '_');
+                if (!empty($sanitizedKey)) {
+                    $matchedKeys[] = $sanitizedKey;
+                }
+            }
+
+            foreach ($matchedKeys as $sKey) {
+                if (isset($markers[$sKey])) {
+                    continue; // Already processed this Senoclock marker
+                }
+
+                $valObj = null;
+
+                // Try to get value directly from extracted map by Senoclock key
+                if (isset($extractedSenoclockMap[$sKey])) {
+                    $valObj = $this->extractValUnitRange($extractedSenoclockMap[$sKey], $extractedMap);
+                } 
+                
+                // Fallback to original logic if needed
+                if (!$valObj) {
+                    $valObj = $this->extractValUnitRange($biomarker, $extractedMap);
+                }
+
+                if ($valObj) {
+                    $markers[$sKey] = $valObj;
                 }
             }
         }
@@ -817,7 +1180,39 @@ class SenoclockAiService
         return $markers;
     }
 
-    private function findSenoclockKey(string $name, array $mapping): ?string
+    /**
+     * Extracts a flat array of valid Senoclock marker keys from the available_biomarkers structure.
+     * Step 3 – Get expected keys from matched_biomarkers.
+     *
+     * @param array $availableBiomarkers The available_biomarkers array from LabReport
+     * @return array List of valid Senoclock keys (e.g. ['HGB', 'WBC'])
+     */
+    public function getExpectedSenoclockKeys(array $availableBiomarkers): array
+    {
+        $mapping = $this->getSenoclockMapping();
+        $expectedKeys = [];
+
+        foreach ($availableBiomarkers as $biomarker) {
+            $matched = is_array($biomarker['matched_biomarkers'] ?? null) ? $biomarker['matched_biomarkers'] : [];
+            foreach ($matched as $matchName) {
+                if (!empty($matchName)) {
+                    $cleanName = strtolower(trim((string)$matchName));
+                    $mKey = $this->findSenoclockKey($cleanName, $mapping);
+                    if ($mKey) {
+                        $expectedKeys[$mKey] = $mKey;
+                    } else {
+                        // Fallback: If not found in mapping, uppercase it
+                        $upperKey = strtoupper(trim((string)$matchName));
+                        $expectedKeys[$upperKey] = $upperKey;
+                    }
+                }
+            }
+        }
+
+        return array_values($expectedKeys);
+    }
+
+    public function findSenoclockKey(string $name, array $mapping): ?string
     {
         $name = strtolower(trim($name));
         if (isset($mapping[$name])) {
@@ -843,6 +1238,13 @@ class SenoclockAiService
                 $value = $first['value'] ?? null;
                 $unit = $first['unit'] ?? null;
                 $range = $first['reference_range'] ?? $first['range'] ?? null;
+            } elseif (is_string($first)) {
+                $matchNorm = strtolower(trim($first));
+                if (isset($extractedMap[$matchNorm])) {
+                    $value = $extractedMap[$matchNorm]['value'] ?? null;
+                    $unit = $extractedMap[$matchNorm]['unit'] ?? null;
+                    $range = $extractedMap[$matchNorm]['range'] ?? $extractedMap[$matchNorm]['reference_range'] ?? null;
+                }
             }
         }
 
@@ -851,7 +1253,19 @@ class SenoclockAiService
             $unit = $biomarker['unit'] ?? null;
             $range = $biomarker['range'] ?? $biomarker['reference_range'] ?? null;
         }
+        
+        if ($value === null || $value === '') {
+            $nameNorm = strtolower(trim($biomarker['name'] ?? ''));
+            if (isset($extractedMap[$nameNorm])) {
+                $value = $extractedMap[$nameNorm]['value'] ?? null;
+                $unit = $extractedMap[$nameNorm]['unit'] ?? null;
+                $range = $extractedMap[$nameNorm]['range'] ?? $extractedMap[$nameNorm]['reference_range'] ?? null;
+            }
+        }
 
+        // Always return the structure if requested, or if value exists.
+        // But if the user really wants the available biomarkers sent, even if value is null?
+        // Let's at least return what we can.
         if ($value !== null && $value !== '') {
             if (is_numeric($value)) {
                 $value = str_contains((string)$value, '.') ? (float)$value : (int)$value;
@@ -863,6 +1277,9 @@ class SenoclockAiService
             ];
         }
 
+        // If we strictly require value for Senoclock, we could return null. 
+        // But let's return it with null if we at least matched it, so the user sees it?
+        // Wait, Senoclock API might crash if value is null.
         return null;
     }
 
@@ -907,7 +1324,7 @@ class SenoclockAiService
                     $contentType = $response->header('Content-Type');
                     if (strpos((string)$contentType, 'application/pdf') !== false) {
                         $fileName = "senoclock_{$reportId}.pdf";
-                        $uploadDir = public_path('uploads');
+                        $uploadDir = public_path('uploads/senoclock');
                         if (!file_exists($uploadDir)) {
                             @mkdir($uploadDir, 0777, true);
                         }
@@ -916,7 +1333,7 @@ class SenoclockAiService
                         file_put_contents($filePath, $response->body());
 
                         Log::info("Senoclock AI PDF report downloaded successfully after {$attempt} attempts.");
-                        return 'uploads/' . $fileName;
+                        return 'uploads/senoclock/' . $fileName;
                     }
                 }
                 

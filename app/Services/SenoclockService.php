@@ -40,10 +40,29 @@ class SenoclockService
                 'password' => $this->password,
             ]);
 
+            // Mask sensitive tokens before logging
+            $logBody = $response->json();
+            if (is_array($logBody)) {
+                if (isset($logBody['access_token'])) {
+                    $logBody['access_token'] = '***MASKED***';
+                }
+                if (isset($logBody['refresh_token'])) {
+                    $logBody['refresh_token'] = '***MASKED***';
+                }
+                if (isset($logBody['token'])) {
+                    $logBody['token'] = '***MASKED***';
+                }
+                if (isset($logBody['key'])) {
+                    $logBody['key'] = '***MASKED***';
+                }
+            } else {
+                $logBody = '***MASKED RESPONSE BODY***';
+            }
+
             Log::info('SenoclockService: Auth Response', [
                 'status' => $response->status(),
                 'headers' => $response->headers(),
-                'body' => $response->body()
+                'body' => $logBody
             ]);
 
             if ($response->successful()) {
@@ -111,10 +130,10 @@ class SenoclockService
      * @param array $markers
      * @return bool True if successful, False otherwise
      */
-    public function executeAlgorithm(string $senoclockId, string $externalId, int $age, string $gender, string $testDate, array $markers): bool
+    public function executeAlgorithm(string $senoclockId, string $externalId, int $age, string $gender, string $testDate, array $markers, array $vitals = []): bool
     {
-        if (!$this->token) {
-            Log::error('SenoclockService: Cannot execute, no valid token');
+        if (empty($this->token)) {
+            Log::error('SenoclockService: Cannot execute without a valid token.');
             return false;
         }
 
@@ -125,8 +144,19 @@ class SenoclockService
             'age' => $age,
             'gender' => $gender,
             'test_date' => $testDate,
-            'markers' => $markers,
         ];
+
+        // Merge vitals into the root payload if provided (before markers)
+        if (!empty($vitals)) {
+            foreach (['height', 'weight', 'blood_pressure', 'allergies'] as $field) {
+                if (isset($vitals[$field]) && $vitals[$field] !== '') {
+                    $payload[$field] = $vitals[$field];
+                }
+            }
+        }
+
+        // Add markers at the end
+        $payload['markers'] = $markers;
 
         try {
             $url = "{$this->baseUrl}/dl-api/file-execute/";
@@ -249,6 +279,17 @@ class SenoclockService
                 }
             }
 
+            // PERMANENT ERROR CHECK
+            // We inspect the response body/error to see if it's a permanent validation error
+            $responseString = isset($response) ? $response->body() : '';
+            if ($this->isPermanentReportGenerationError($responseString)) {
+                Log::error("SenoclockService: Permanent marker validation error detected. Stopping retries immediately.", [
+                    'senoclock_id' => $senoclockId,
+                    'error_body' => substr($responseString, 0, 500)
+                ]);
+                return ['success' => false, 'error' => "SenoClock Permanent Error: " . $responseString];
+            }
+
             // Wait before next retry
             if ($attempt < $maxRetries) {
                 sleep($retryDelay);
@@ -256,6 +297,30 @@ class SenoclockService
         }
 
         return ['success' => false, 'error' => 'Max retries exhausted'];
+    }
+
+    /**
+     * Check if SenoClock returned a permanent error that shouldn't be retried
+     */
+    private function isPermanentReportGenerationError(string $responseBody): bool
+    {
+        $bodyLower = strtolower($responseBody);
+        
+        $permanentErrors = [
+            'minimum 15 markers required',
+            'unsupported or mismatched units found',
+            'invalid marker',
+            'unsupported marker',
+            'invalid unit'
+        ];
+
+        foreach ($permanentErrors as $err) {
+            if (str_contains($bodyLower, $err)) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 
     /**

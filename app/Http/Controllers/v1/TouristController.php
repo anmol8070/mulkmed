@@ -1288,6 +1288,13 @@ Team Mulk Med";
                     $doctor_jitsi_meeting->doctor_joined = 1;
                     $doctor_jitsi_meeting->save();
 
+                    if ($doctor_jitsi_meeting->doctor_joined && $doctor_jitsi_meeting->user_joined) {
+                        $appointment = \App\Models\TouristAppointment::find($jitsi_meeting->appointment_id);
+                        if ($appointment && $appointment->status == \App\Models\Constants::orderAccepted) {
+                            $appointment->status = \App\Models\Constants::orderCompleted;
+                            $appointment->save();
+                        }
+                    }
                     $fullUrl = $doctor_jitsi_meeting->doctor_link;
                     $parsedUrl = parse_url($fullUrl);
                     parse_str($parsedUrl['query'], $query);
@@ -1298,6 +1305,16 @@ Team Mulk Med";
             }
             if($request->has('tourist_id'))
             {
+                $jitsi_meeting->user_joined = 1;
+                $jitsi_meeting->save();
+
+                if ($jitsi_meeting->doctor_joined && $jitsi_meeting->user_joined) {
+                    $appointment = \App\Models\TouristAppointment::find($jitsi_meeting->appointment_id);
+                    if ($appointment && $appointment->status == \App\Models\Constants::orderAccepted) {
+                        $appointment->status = \App\Models\Constants::orderCompleted;
+                        $appointment->save();
+                    }
+                }
                 
                 if($jitsi_meeting->doctor_joined == 1)
                 {
@@ -1344,6 +1361,13 @@ Team Mulk Med";
                     $doctor_jitsi_meeting->doctor_joined = 1;
                     $doctor_jitsi_meeting->save();
 
+                    if ($doctor_jitsi_meeting->doctor_joined && $doctor_jitsi_meeting->user_joined) {
+                        $appointment = \App\Models\TouristAppointment::find($jitsi_meeting->appointment_id);
+                        if ($appointment && $appointment->status == \App\Models\Constants::orderAccepted) {
+                            $appointment->status = \App\Models\Constants::orderCompleted;
+                            $appointment->save();
+                        }
+                    }
                     $fullUrl = $doctor_jitsi_meeting->doctor_link;
                     $parsedUrl = parse_url($fullUrl);
                     parse_str($parsedUrl['query'], $query);
@@ -1354,6 +1378,16 @@ Team Mulk Med";
             }
             if($request->has('tourist_id'))
             {
+                $jitsi_meeting->user_joined = 1;
+                $jitsi_meeting->save();
+
+                if ($jitsi_meeting->doctor_joined && $jitsi_meeting->user_joined) {
+                    $appointment = \App\Models\TouristAppointment::find($jitsi_meeting->appointment_id);
+                    if ($appointment && $appointment->status == \App\Models\Constants::orderAccepted) {
+                        $appointment->status = \App\Models\Constants::orderCompleted;
+                        $appointment->save();
+                    }
+                }
                 
                 // if($jitsi_meeting->doctor_joined != 1)
                 // {
@@ -1408,7 +1442,7 @@ Team Mulk Med";
                             ->Where('tourist_id', $request->tourist_id)
                             ->Where('doctor_id', $appointment->doctor_id)
                             ->WhereNotIn('id', [$appointment->id])
-                            ->WhereIn('status', [Constants::orderCompleted, Constants::orderCancelled, Constants::orderDeclined])
+                            ->WhereIn('status', [Constants::orderCompleted, Constants::orderCancelled, Constants::orderDeclined, Constants::orderMissed])
                             ->get();
 
             $jitsiMeeting = DB::table('tourist_jitsi_meetings')
@@ -1472,7 +1506,7 @@ Team Mulk Med";
                 TouristAppointments::with(['tourist', 'doctor', 'documents', 'prescription', 'rating', 'appointmentMeeting','emrdocuments'])
                 ->Where('doctor_id', $request->doctor_id)
                 ->WhereNotIn('id', [$appointment->id])
-                ->WhereIn('status', [Constants::orderCompleted, Constants::orderCancelled, Constants::orderDeclined])
+                ->WhereIn('status', [Constants::orderCompleted, Constants::orderCancelled, Constants::orderDeclined, Constants::orderMissed])
                 ->where('status', Constants::orderPlacedPending)
                 ->get();
 
@@ -1515,7 +1549,7 @@ Team Mulk Med";
             ->Where('doctor_id', $result->doctor_id)
             ->Where('tourist_id', $result->tourist_id)
             ->WhereNotIn('id', [$result->id])
-            ->WhereIn('status', [Constants::orderCompleted, Constants::orderCancelled, Constants::orderDeclined])
+            ->WhereIn('status', [Constants::orderCompleted, Constants::orderCancelled, Constants::orderDeclined, Constants::orderMissed])
             ->get();
 
         $jitsiMeeting = DB::table('tourist_jitsi_meetings')
@@ -1910,13 +1944,34 @@ Team Mulk Med";
             });
 
         foreach ($result as $appointment) {
+            if (in_array($appointment->status, [Constants::orderPlacedPending, Constants::orderAccepted])) {
+                $formattedTime = GlobalFunction::formateTimeString($appointment->time);
+                if ($formattedTime) {
+                    $appointmentDateTime = \Carbon\Carbon::parse($appointment->date . ' ' . $formattedTime);
+
+                    $hasJoined = \Illuminate\Support\Facades\DB::table('tourist_jitsi_meetings')
+                        ->where('appointment_id', $appointment->id)
+                        ->where(function($query) {
+                            $query->where('doctor_joined', 1)->orWhere('user_joined', 1);
+                        })
+                        ->exists();
+
+                    if ($appointmentDateTime->copy()->addHour()->isPast() && $appointment->created_at->copy()->addHour()->isPast()) {
+                        if (!$hasJoined) {
+                            $appointment->status = Constants::orderMissed;
+                        } else {
+                            $appointment->status = Constants::orderCompleted;
+                        }
+                        $appointment->save();
+                    }
+                }
+            }
             $appointment->previous_appointments =
                 TouristAppointments::with(['tourist', 'doctor', 'documents', 'prescription', 'rating', 'appointmentMeeting','emrdocuments'])
                 ->Where('doctor_id', $request->doctor_id)
                 ->Where('tourist_id', $appointment->tourist_id)
                 ->WhereNotIn('id', [$appointment->id])
-                ->Where('tourist_appointments.status','!=',5)
-                ->WhereIn('status', [Constants::orderCompleted, Constants::orderCancelled, Constants::orderDeclined])
+                ->WhereIn('status', [Constants::orderCompleted, Constants::orderCancelled, Constants::orderDeclined, Constants::orderMissed])
                 ->select('tourist_appointments.*') // ⚠ important
                 ->get()
                 ->map(function ($item) {

@@ -186,20 +186,41 @@ class LabReportBiomarkerAnalyzerService
      */
     protected function extractFromDocument(?UploadedFile $file, ?string $ocrText): array
     {
-        $ocrText = trim((string) $ocrText);
+        $apiKey = config('services.openai.api_key');
+        $initialOpenAiResult = null;
 
-        if ($file) {
-            $openAiResult = $this->extractWithOpenAi($file, $ocrText);
-            if ($openAiResult !== null) {
-                return $openAiResult;
-            }
-
-            $ocrSpaceResult = $this->extractWithOcrSpace($file);
-            if ($ocrSpaceResult !== null) {
-                return $ocrSpaceResult;
+        if (!empty($apiKey) && $file) {
+            $initialOpenAiResult = $this->extractWithOpenAi($file, (string) $ocrText);
+            // If OpenAI successfully extracted some biomarkers, return early.
+            if ($initialOpenAiResult !== null && !empty($initialOpenAiResult['extracted_biomarkers'])) {
+                return $initialOpenAiResult;
             }
         }
 
+        $ocrSpaceResult = $file ? $this->extractWithOcrSpace($file) : null;
+        
+        // If OCR.space succeeded, it gives us the raw OCR text. 
+        // We must pass this raw text to OpenAI to extract the structured JSON (with values, units, and ranges).
+        if ($ocrSpaceResult !== null && !empty($apiKey)) {
+            $ocrTextFromSpace = $ocrSpaceResult['ocr_text'] ?? '';
+            if ($ocrTextFromSpace !== '') {
+                $openAiRetry = $this->extractWithOpenAi($file, $ocrTextFromSpace);
+                if ($openAiRetry !== null) {
+                    return $openAiRetry;
+                }
+            }
+        }
+
+        if ($ocrSpaceResult !== null) {
+            return $ocrSpaceResult;
+        }
+
+        // If we had a valid OpenAI result but it just had 0 biomarkers, return it as a last resort before text fallbacks
+        if ($initialOpenAiResult !== null) {
+            return $initialOpenAiResult;
+        }
+
+        $ocrText = trim((string) $ocrText);
         if ($ocrText !== '') {
             return [
                 'extracted_biomarkers' => $this->extractBiomarkerNamesFromText($ocrText),
@@ -335,16 +356,30 @@ class LabReportBiomarkerAnalyzerService
 
         if ($isPdf) {
             // Vision models need an image; fall back to PDF text extraction path.
-            $pdfText = $this->extractTextFromPdf($file);
-            // Sanitize invalid UTF-8 characters to prevent json_encode errors
-            $pdfText = mb_convert_encoding($pdfText, 'UTF-8', 'UTF-8');
+            // BUGFIX: Only try to extract from PDF if we don't already have text from OCR fallback
+            $pdfText = $existingOcrText !== '' ? '' : $this->extractTextFromPdf($file);
+            if ($pdfText !== '') {
+                // Sanitize invalid UTF-8 characters to prevent json_encode errors
+                $pdfText = mb_convert_encoding($pdfText, 'UTF-8', 'UTF-8');
+            }
             
-            if ($pdfText === '' && $existingOcrText === '') {
+            $textForAi = $existingOcrText !== '' ? $existingOcrText : $pdfText;
+
+            Log::info('LabReport: PDF extraction result', [
+                'pdf_path' => $file->getRealPath(),
+                'text_length' => strlen($pdfText),
+                'ocr_text_length' => strlen($existingOcrText),
+            ]);
+
+            if ($textForAi === '') {
                 Log::warning('OpenAI lab report analysis skipped: PDF has no extractable text and no OCR text provided');
                 return null;
             }
 
-            $textForAi = $pdfText !== '' ? $pdfText : $existingOcrText;
+            Log::info('LabReport: OCR/text preview', [
+                'preview' => mb_substr($textForAi, 0, 500, 'UTF-8'),
+            ]);
+
             $payload = $this->buildOpenAiTextPayload($textForAi);
         } else {
             $base64 = base64_encode(file_get_contents($file->getRealPath()));
@@ -425,7 +460,8 @@ class LabReportBiomarkerAnalyzerService
 
         return [
             'model' => config('services.openai.model', 'gpt-4o-mini'),
-            'temperature' => 0.1,
+            'temperature' => 0.3,
+            'max_tokens' => 2000,
             'response_format' => ['type' => 'json_object'],
             'messages' => [
                 ['role' => 'system', 'content' => $system],
@@ -444,7 +480,8 @@ class LabReportBiomarkerAnalyzerService
     {
         return [
             'model' => config('services.openai.model', 'gpt-4o-mini'),
-            'temperature' => 0.1,
+            'temperature' => 0.3,
+            'max_tokens' => 2000,
             'response_format' => ['type' => 'json_object'],
             'messages' => [
                 ['role' => 'system', 'content' => $this->analystSystemPrompt()],
@@ -463,24 +500,24 @@ You are an expert AI Document Analyst specializing in OCR document verification 
 Read OCR/lab report content even if it contains minor spelling mistakes.
 Extract structured biomarker/test details from the document.
 Ignore punctuation, capitalization, and small grammatical differences.
+EXTRACT ALL BIOMARKERS FOUND IN THE TEXT. DO NOT TRUNCATE OR STOP EARLY. THERE MAY BE 30+ BIOMARKERS.
+
+Use the following STANDARD SHORT NAMES as the JSON key "name" when you encounter their corresponding full forms or variations:
+AAMY (Alpha-Amylase), AFP (Alpha Fetoprotein), ALB (Albumin), ALP (Alkaline Phosphatase), ALT (Alanine Transaminase / SGPT), AST (Aspartate Transaminase / SGOT), ATLYMPH (Atypical lymphocytes), BASO% (Basophils), BILID (Direct Bilirubin), BILIT (Total Bilirubin), BUN (Blood Urea Nitrogen), CA (Calcium), CHOLT (Total Cholesterol), CL (Chloride), CREA (Creatinine), EOS% (Eosinophils), ESR (Erythrocyte Sedimentation Rate), FERR (Ferritin), GGT (Gamma-GT), GLOBT (Total Globulin), GLC (Glucose / Blood Sugar Fasting), HCT (Hematocrit), HDL (HDL Cholestrol), HGB (Hemoglobin), HGBA1C (Hemoglobin A1c / HbA1c), IRON (Iron), K+ (Potassium), LDL (LDL Cholesterol), LYMPH% (Lymphocytes), MCH (Mean Corpuscular Haemoglobin), MCHC (Mean Corpuscular Haemoglobin Concentration), MCV (Mean Corpuscular Volume), MONO% (Monocytes), MPV (Mean Platelet Volume), NA+ (Sodium), NEUTR% (Neutrophils), P (Phosphorous), PDW (Platelet Distribution Width), PLT (Platelets / Platelet Count), PROT (Total Protein), RBC (Red Blood Cell / RBC Count), RDW (Red Cell Distribution Width), TRIG (Triglycerides), UA (Uric Acid), WBC (White Blood Cell / Total WBC Count), CRP (C-reactive protein), VIT-D (Vitamin D), PTH (Parathyroid hormone), APOB (Apolipoprotein B), LDH (Lactate Dehydrogenase), MG+ (Magnesium), GFR (Glomerular Filtration Rate), IGF-1 (Insulin-like Growth Factor-1), C-PEPTIDE (Connecting peptide).
+
+For any other biomarkers not in this list, use their name as found in the text.
+
 Return ONLY valid JSON with this shape:
 {
-  "ocr_text": "full readable text extracted from the document",
   "extracted_biomarkers": [
     {
-      "name": "Hemoglobin (Hb)",
-      "value": "14.2",
-      "unit": "g/dL",
-      "range": "12-16"
-    },
-    {
-      "name": "Total Cholesterol",
-      "value": "180",
+      "name": "GLC",
+      "value": "91",
       "unit": "mg/dL",
-      "range": "100-200"
+      "range": "70-99"
     }
   ],
-  "confidence_score": 0.0
+  "confidence_score": 0.9
 }
 If a value is not found or is non-numerical, set it to null.
 Do not include markdown. Do not include explanations outside JSON.
@@ -497,23 +534,22 @@ PROMPT;
         $system = <<<PROMPT
 You are an expert AI Document Analyst specializing in OCR document verification.
 Extract structured biomarker/test names from the OCR text of a lab report.
+EXTRACT EVERY SINGLE BIOMARKER FOUND IN THE TEXT. DO NOT TRUNCATE OR STOP EARLY. THERE MAY BE 30+ BIOMARKERS.
 Return ONLY valid JSON with this shape:
 {
   "markers": {
-    "HDL": {
-      "range": "45-999",
-      "unit": "mg/dL",
-      "value": 42
-    },
-    "LDL": {
-      "range": "0-150",
-      "unit": "mg/dL",
-      "value": 97
+    "CHOLT": {
+      "range": "115.00 - 190.00",
+      "unit": "mg/dl",
+      "value": 165.7
     }
   }
 }
 If a value is not a number, try to clean it up (e.g. "42.5"). If it's a string like "Positive", you can return it as the value.
-Use standard abbreviations as keys if possible (HDL, LDL, TRIG, HGBA1C, GLC, ALT, AST, CRP, WBC, CREA, ALB, GGT, PLT, NA+, K+).
+Use the following STANDARD SHORT NAMES as the JSON key when you encounter their corresponding full forms or variations:
+AAMY (Alpha-Amylase), AFP (Alpha Fetoprotein), ALB (Albumin), ALP (Alkaline Phosphatase), ALT (Alanine Transaminase / SGPT), AST (Aspartate Transaminase / SGOT), ATLYMPH (Atypical lymphocytes), BASO% (Basophils), BILID (Direct Bilirubin), BILIT (Total Bilirubin), BUN (Blood Urea Nitrogen), CA (Calcium), CHOLT (Total Cholesterol), CL (Chloride), CREA (Creatinine), EOS% (Eosinophils), ESR (Erythrocyte Sedimentation Rate), FERR (Ferritin), GGT (Gamma-GT), GLOBT (Total Globulin), GLC (Glucose / Blood Sugar Fasting), HCT (Hematocrit), HDL (HDL Cholestrol), HGB (Hemoglobin), HGBA1C (Hemoglobin A1c / HbA1c), IRON (Iron), K+ (Potassium), LDL (LDL Cholesterol), LYMPH% (Lymphocytes), MCH (Mean Corpuscular Haemoglobin), MCHC (Mean Corpuscular Haemoglobin Concentration), MCV (Mean Corpuscular Volume), MONO% (Monocytes), MPV (Mean Platelet Volume), NA+ (Sodium), NEUTR% (Neutrophils), P (Phosphorous), PDW (Platelet Distribution Width), PLT (Platelets / Platelet Count), PROT (Total Protein), RBC (Red Blood Cell / RBC Count), RDW (Red Cell Distribution Width), TRIG (Triglycerides), UA (Uric Acid), WBC (White Blood Cell / Total WBC Count), CRP (C-reactive protein), VIT-D (Vitamin D), PTH (Parathyroid hormone), APOB (Apolipoprotein B), LDH (Lactate Dehydrogenase), MG+ (Magnesium), GFR (Glomerular Filtration Rate), IGF-1 (Insulin-like Growth Factor-1), C-PEPTIDE (Connecting peptide).
+
+For any other biomarkers not in this list, use a sanitized uppercase version of their name (e.g., "UNKNOWN_MARKER") as the key.
 Do not include markdown. Do not include explanations outside JSON.
 PROMPT;
 
@@ -606,7 +642,18 @@ PROMPT;
             }
         }
 
-        return trim(implode("\n", array_unique($texts)));
+        $cleanText = trim(implode("\n", array_unique($texts)));
+        
+        // Prevent binary garbage from compressed PDFs from being passed to AI
+        $totalCount = strlen($cleanText);
+        if ($totalCount > 0) {
+            $printableCount = preg_match_all('/[a-zA-Z0-9\s.,;:!?"\'()-]/', $cleanText);
+            if (($printableCount / $totalCount) < 0.5) {
+                return ''; // Discard garbage text
+            }
+        }
+
+        return $cleanText;
     }
 
     /**
@@ -707,8 +754,8 @@ PROMPT;
             $confidence = $panelMatched ? 0.85 : 0.9;
         } else {
             $ratio = $matchedCount / $biomarkerTotal;
-            // Present if panel name found OR at least one biomarker from the panel is found.
-            $isPresent = $panelMatched || $matchedCount >= 1;
+            // Present if panel name found OR ALL biomarkers from the panel are found.
+            $isPresent = $panelMatched || $matchedCount === $biomarkerTotal;
             $confidence = round(min(0.99, max(0.55, ($panelMatched ? 0.35 : 0) + ($ratio * 0.65) + 0.2)), 2);
             if (!$isPresent) {
                 $confidence = round(min(0.99, 0.7 + ((1 - $ratio) * 0.25)), 2);
@@ -767,6 +814,20 @@ PROMPT;
 
         if ($a === $b) {
             return true;
+        }
+        
+        // Use Senoclock mapping for standard biomarker matching
+        try {
+            $aiService = app(\App\Services\SenoclockAiService::class);
+            $mapping = $aiService->getSenoclockMapping();
+            $keyA = $aiService->findSenoclockKey($a, $mapping);
+            $keyB = $aiService->findSenoclockKey($b, $mapping);
+            
+            if ($keyA !== null && $keyA === $keyB) {
+                return true;
+            }
+        } catch (\Throwable $e) {
+            // Ignore if service not available
         }
 
         similar_text($a, $b, $percent);
