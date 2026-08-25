@@ -31,6 +31,8 @@ class LabReport extends Model
         'senoclock_pdf_path',
         'senoclock_status',
         'senoclock_generated_at',
+        'vitals',
+        'markers',
     ];
 
     protected $casts = [
@@ -46,5 +48,7 @@ class LabReport extends Model
         'status' => 'integer',
         'senoclock_status' => 'string',
         'senoclock_generated_at' => 'datetime',
+        'vitals' => 'array',
+        'markers' => 'array',
     ];
 }

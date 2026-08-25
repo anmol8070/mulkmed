@@ -13,6 +13,7 @@ class MajorOrganUserSelection extends Model
 
     protected $fillable = [
         'user_id',
+        'plan_id',
         'selection_type',
         'package_id',
         'package_title',
@@ -24,6 +25,8 @@ class MajorOrganUserSelection extends Model
         'selected_biomarkers',
         'total_amount',
         'status',
+        'order_id',
+        'payment_status',
     ];
 
     protected $casts = [

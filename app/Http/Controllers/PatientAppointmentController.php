@@ -395,7 +395,7 @@ class PatientAppointmentController extends Controller
 // Regards,
 // Team Mulk Med";     
 
-$message = "Appointment: {$userAppointmentDate} at {$userAppointmentTime}. Join:here{$patient_link_mail}";
+$message = "Appointment: {$userAppointmentDate} at {$userAppointmentTime}. Join:here {$patient_link_mail}";
                 $result = EmailHelpers::sendSms($cleanCode . $user->phone_number, $message);
                 Log::info('BOOKING_TRACE patient flow patient sms triggered', [
                     'appointment_id' => $appointment->id,

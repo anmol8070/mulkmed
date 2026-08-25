@@ -1343,15 +1343,16 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
             $ai_vital_misa = new AIVitalScanMisa();
             $ai_vital_misa->user_id = $request->user_id;
             $ai_vital_misa->order_id = $order_id;
-            $ai_vital_misa->report_from = $request->report_from ?? 'longevity';
+            $actualReportFrom = $request->report_from ?? $request->report_form ?? $request->report ?? 'longevity';
+            $ai_vital_misa->report_from = $actualReportFrom;
             $ai_vital_misa->payment_status = 0;
             $ai_vital_misa->payment_amount = $amount;
-            $ai_vital_misa->payment_type = Constants::CCAvenueLongevityPaymentType;
+            $ai_vital_misa->payment_type = ($actualReportFrom === 'major_organ') ? Constants::CCAvenueMajorOrganPaymentType : Constants::CCAvenueLongevityPaymentType;
             $ai_vital_misa->scan_date = $request->date;
 
             // Persist full checkout payload fields when columns exist
             $extraFields = [
-                'plan_id' => $request->plan_id,
+                'plan_id' => is_array($request->plan_id) ? implode(',', $request->plan_id) : $request->plan_id,
                 'doctor_id' => $request->doctor_id,
                 'problem' => $request->problem,
                 'time' => $request->time,
@@ -1376,6 +1377,42 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
 
             $ai_vital_misa->save();
 
+            // Save in major_organ_user_selections as per the requested plan_id array
+            if ($request->has('plan_id') && is_array($request->plan_id)) {
+                foreach ($request->plan_id as $pid) {
+                    $test = \App\Models\MajorOrganTest::find($pid);
+                    
+                    $selection = new \App\Models\MajorOrganUserSelection();
+                    $selection->user_id = $request->user_id;
+                    $selection->plan_id = $pid;
+                    $selection->selection_type = $actualReportFrom;
+                    
+                    // Apportioning the total amount for each plan evenly
+                    $selection->total_amount = count($request->plan_id) > 0 ? ($amount / count($request->plan_id)) : $amount; 
+                    
+                    $selection->order_id = $order_id;
+                    $selection->status = 2; // status for initiated/pending
+                    $selection->payment_status = 0;
+                    
+                    if ($test) {
+                        $biomarkers = is_array($test->biomarkers) ? $test->biomarkers : [];
+                        $selection->selected_organ_tests = [[
+                            'id' => $test->id,
+                            'name' => $test->name,
+                            'icon' => !empty($test->icon) ? ltrim($test->icon, '/') : null,
+                            'price' => number_format((float) $test->price, 2, '.', ''),
+                            'biomarker_count' => count($biomarkers),
+                            'biomarkers' => $biomarkers,
+                        ]];
+                        $selection->selected_biomarkers = array_values(array_unique($biomarkers));
+                        $selection->organ_health_check_count = 1;
+                        $selection->total_biomarkers = count($selection->selected_biomarkers);
+                    }
+                    
+                    $selection->save();
+                }
+            }
+
             $baseUrl = request()->getSchemeAndHttpHost();
             $redirectUrl = $baseUrl . '/api/v1/payment-response';
             $cancelUrl   = $baseUrl . '/api/v1/payment-cancel';
@@ -1387,8 +1424,8 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                 "order_id" => $order_id,
                 "currency" => $currency,
                 "amount" => number_format($amount, 2, '.', ''),
-                "merchant_param4" => $request->plan_id,
-                "merchant_param5" => Constants::CCAvenueLongevityPaymentType,
+                "merchant_param4" => is_array($request->plan_id) ? implode(',', $request->plan_id) : $request->plan_id,
+                "merchant_param5" => ($actualReportFrom === 'major_organ') ? Constants::CCAvenueMajorOrganPaymentType : Constants::CCAvenueLongevityPaymentType,
                 "redirect_url" => $redirectUrl,
                 "cancel_url" => $cancelUrl,
                 "language" => "EN",
@@ -2030,7 +2067,7 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                 ]);
             }
 
-            else if(($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanBeforePaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMesaBeforeChatPayment) || ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType)){
+            else if(($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanBeforePaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMesaBeforeChatPayment) || ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMajorOrganPaymentType)){
                 $ai_vital_misa = AIVitalScanMisa::where('order_id', $responseData['order_id'])->first();
                 if($ai_vital_misa){
                     if($status == 'Success'){
@@ -2038,36 +2075,54 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                         $ai_vital_misa->payment_type = $responseData['merchant_param5'];
                         $ai_vital_misa->save();
 
-                        // If it's a longevity plan purchase and plan_id is valid
-                        $planId = $responseData['merchant_param4'] ?? null;
-                        if ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType && $planId) {
-                            $longevityPlan = LongevityPlan::find($planId);
+                        // If it's a longevity plan purchase
+                        $planIdsString = $responseData['merchant_param4'] ?? null;
+                        if ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType) {
+                            if ($planIdsString) {
+                                $planIds = explode(',', $planIdsString);
+                                foreach ($planIds as $pid) {
+                                    $longevityPlan = LongevityPlan::find($pid);
                             if ($longevityPlan) {
                                 $expiryDate = null;
                                 if (!empty($longevityPlan->plan_expiry_days)) {
                                     $expiryDate = \Carbon\Carbon::now()->addDays((int)$longevityPlan->plan_expiry_days)->format('Y-m-d');
                                 }
                                 UserLongevityPlan::firstOrCreate(
-                                    ['order_id' => $responseData['order_id']],
+                                            ['order_id' => $responseData['order_id'], 'plan_id' => $pid],
                                     [
                                         'user_id' => $ai_vital_misa->user_id,
-                                        'plan_id' => $planId,
-                                        'amount' => $responseData['amount'],
+                                                'amount' => count($planIds) > 0 ? ($responseData['amount'] / count($planIds)) : $responseData['amount'],
                                         'status' => 1,
                                         'expiry_date' => $expiryDate,
                                     ]
                                 );
+                            }
 
-                                // Optionally link to ai_vitals table as requested
+                            // Always link to ai_vitals table for longevity purchases
                                 \App\Models\AI_Vital::create([
                                     'user_id' => $ai_vital_misa->user_id,
-                                    'plan_id' => $planId,
+                                        'plan_id' => $pid,
                                     'is_longevity' => 1,
                                     'scan_date' => \Carbon\Carbon::now()->format('Y-m-d'),
                                     'report' => '',
                                     'senoclock_ai_response' => [],
                                     'shen_ai' => [],
                                 ]);
+                                }
+                            }
+                        } else if ($responseData['merchant_param5'] == Constants::CCAvenueMajorOrganPaymentType) {
+                            $selectionId = $responseData['merchant_param4'] ?? null;
+                            if ($selectionId) {
+                                $selection = \App\Models\MajorOrganUserSelection::find($selectionId);
+                                if ($selection) {
+                                    // Duplicate the selection to create a new entry instead of updating the existing one
+                                    $newSelection = $selection->replicate();
+                                    $newSelection->status = 2; // Purchased
+                                    $newSelection->order_id = $responseData['order_id'];
+                                    $newSelection->payment_status = 1;
+                                    $newSelection->plan_id = $selectionId; // Store the original cart item ID in plan_id
+                                    $newSelection->save();
+                                }
                             }
                         }
                     }
@@ -2391,7 +2446,7 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
             ]);
             }
 
-            else if(($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanPaymentType) || ($responseData['merchant_param5'] == Constants::AIVitalScanPaymentBeforeType) || ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMesaBeforeChatPayment) || ($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanBeforePaymentType)){
+            else if(($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanPaymentType) || ($responseData['merchant_param5'] == Constants::AIVitalScanPaymentBeforeType) || ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMajorOrganPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMesaBeforeChatPayment) || ($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanBeforePaymentType)){
                 $ai_vital_misa = AIVitalScanMisa::where('order_id', $responseData['order_id'])->first();
                 if($ai_vital_misa){
                    
@@ -2698,5 +2753,4 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
             }
         }
     }
-
 }
