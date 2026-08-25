@@ -147,3 +147,6 @@ Route::post('increaseReelViewCount', [ReelController::class, 'increaseReelViewCo
 
 // Cron
 Route::get('sendScheduledReminders_Cron', [SettingsController::class, 'sendScheduledReminders_and_expirePlan_Cron']);
+
+// Lab Report Analysis (Native)
+Route::post('lab-report/analyze', [\App\Http\Controllers\v1\MajorOrganTestController::class, 'analyzeNative']);

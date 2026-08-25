@@ -46,10 +46,4 @@ return [
         'api_key' => env('OPENAI_API_KEY'),
         'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),
     ],
-    // Free OCR fallback for lab report images (https://ocr.space/ocrapi)
-    // Default "helloworld" is OCR.space's public demo key (rate-limited).
-    'ocr_space' => [
-        'api_key' => env('OCR_SPACE_API_KEY', 'helloworld'),
-        'endpoint' => env('OCR_SPACE_ENDPOINT', 'https://api.ocr.space/parse/image'),
-    ],
 ];

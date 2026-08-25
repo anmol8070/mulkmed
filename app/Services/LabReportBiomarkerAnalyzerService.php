@@ -40,9 +40,461 @@ class LabReportBiomarkerAnalyzerService
      *
      * @param  Collection<int, MajorOrganTest>  $organTests
      */
+    /**
+     * Handle array of files for analysis by combining their extractions.
+     */
+    public function analyzeMultiple(array $files, ?string $ocrText, Collection $organTests): array
+    {
+        if (empty($files)) {
+            return $this->analyze(null, $ocrText, $organTests);
+        }
+
+        $files = array_filter($files);
+        if (empty($files)) {
+            return $this->analyze(null, $ocrText, $organTests);
+        }
+
+        $pdfFiles = [];
+        $imageFiles = [];
+        foreach ($files as $file) {
+            $mime = $file->getMimeType() ?: '';
+            $extension = strtolower($file->getClientOriginalExtension() ?: '');
+            $isPdf = str_contains($mime, 'pdf') || $extension === 'pdf';
+            if ($isPdf) {
+                $pdfFiles[] = $file;
+            } else {
+                $imageFiles[] = $file;
+            }
+        }
+
+        Log::info('Starting native PDF analysis');
+
+        $uploadedFiles = $this->uploadMultiplePdfs($pdfFiles);
+
+        Log::info('Multi-PDF extraction validation', [
+            'document_count' => count($uploadedFiles),
+            'documents' => array_column($uploadedFiles, 'original_name'),
+            'file_ids' => array_column($uploadedFiles, 'file_id'),
+        ]);
+
+        Log::info('All PDFs uploaded successfully', [
+            'count' => count($uploadedFiles),
+        ]);
+
+        $prompt = <<<PROMPT
+You are analyzing a laboratory PDF document.
+
+Analyze the ENTIRE PDF.
+Read every page.
+Extract EVERY laboratory biomarker/test present.
+Do not stop after finding common biomarkers.
+Do not return only biomarkers relevant to SenoClock.
+Do not return only biomarkers matching the database.
+Do not summarize the report.
+Do not select a subset.
+Preserve every biomarker found.
+Include biomarker name.
+Include value.
+Include unit.
+Include reference range.
+Include source_document.
+If multiple biomarkers occur on different pages, include all of them.
+Never omit a biomarker because another PDF contains the same biomarker.
+Duplicate biomarkers across documents must remain identifiable by source_document.
+
+Return ONLY valid JSON.
+
+Required structure:
+
+{
+  "biomarkers": [
+    {
+      "name": "Hemoglobin (Hb)",
+      "value": 14.2,
+      "unit": "g/dL",
+      "range": "13.0 - 17.0",
+      "source_document": "allbiomarkers.pdf"
+    }
+  ]
+}
+
+Do not invent values.
+Do not invent reference ranges.
+Do not normalize away clinically distinct tests.
+Do not return markdown.
+Do not return ```json fences.
+Return only JSON.
+PROMPT;
+
+        $allExtractedBiomarkers = [];
+        $documentSummaries = [];
+        $documentResults = [];
+
+        foreach ($uploadedFiles as $uploadedFile) {
+            try {
+                $biomarkers = $this->analyzeSingleUploadedPdf($uploadedFile, $prompt);
+                
+                $allExtractedBiomarkers = array_merge($allExtractedBiomarkers, $biomarkers);
+                
+                $documentSummaries[] = [
+                    'filename' => $uploadedFile['original_name'],
+                    'file_id' => $uploadedFile['file_id'],
+                    'biomarker_count' => count($biomarkers),
+                ];
+                $documentResults[] = $uploadedFile['file_id'];
+                
+            } catch (\Exception $e) {
+                Log::error('Individual PDF analysis failed', [
+                    'filename' => $uploadedFile['original_name'] ?? 'unknown',
+                    'file_id' => $uploadedFile['file_id'] ?? 'unknown',
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        foreach ($imageFiles as $imageFile) {
+            try {
+                $result = $this->extractWithOpenAi($imageFile, '');
+                if ($result && !empty($result['extracted_biomarkers'])) {
+                    $allExtractedBiomarkers = array_merge($allExtractedBiomarkers, $result['extracted_biomarkers']);
+                    $documentSummaries[] = [
+                        'filename' => $imageFile->getClientOriginalName(),
+                        'file_id' => 'image',
+                        'biomarker_count' => count($result['extracted_biomarkers']),
+                    ];
+                    $documentResults[] = 'image';
+                }
+            } catch (\Exception $e) {
+                Log::error('Individual image analysis failed', [
+                    'filename' => $imageFile->getClientOriginalName(),
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        $expectedDocs = count($uploadedFiles) + count($imageFiles);
+        if (count($documentResults) < $expectedDocs) {
+            Log::error('Multi-PDF extraction incomplete', [
+                'expected_document_count' => $expectedDocs,
+                'actual_extracted_document_count' => count($documentResults),
+            ]);
+        }
+
+        // Deterministic deduplication in PHP
+        $uniqueBiomarkers = [];
+        foreach ($allExtractedBiomarkers as $marker) {
+            if (!isset($marker['name'])) {
+                continue;
+            }
+            
+            $normName = strtolower(trim((string)$marker['name']));
+            
+            if (!isset($uniqueBiomarkers[$normName])) {
+                $uniqueBiomarkers[$normName] = $marker;
+            } else {
+                // If existing is empty/null, but new one is better, replace it
+                $existing = $uniqueBiomarkers[$normName];
+                $existingValue = $existing['value'] ?? null;
+                $newValue = $marker['value'] ?? null;
+
+                $existingHasValue = !is_null($existingValue) && $existingValue !== '';
+                $newHasValue = !is_null($newValue) && $newValue !== '';
+                
+                $existingIsNumeric = is_numeric($existingValue);
+                $newIsNumeric = is_numeric($newValue);
+
+                // Prefer non-null, valid numeric values over empty ones
+                if (!$existingHasValue && $newHasValue) {
+                    $uniqueBiomarkers[$normName] = $marker;
+                } elseif ($existingHasValue && $newHasValue && !$existingIsNumeric && $newIsNumeric) {
+                    $uniqueBiomarkers[$normName] = $marker;
+                }
+                // Otherwise keep existing (do not overwrite earlier valid record)
+            }
+        }
+
+        $uniqueBiomarkerList = array_values($uniqueBiomarkers);
+        $uniqueBiomarkerNames = array_column($uniqueBiomarkerList, 'name');
+
+        Log::info('Multi-PDF final extraction summary', [
+            'document_count' => count($uploadedFiles),
+            'documents' => array_column($uploadedFiles, 'original_name'),
+            'total_raw_biomarkers' => count($allExtractedBiomarkers),
+            'unique_biomarker_count' => count($uniqueBiomarkerList),
+            'unique_biomarker_names' => $uniqueBiomarkerNames,
+        ]);
+
+        Log::info('Multi-PDF document biomarker summary', [
+            'documents' => $documentSummaries,
+        ]);
+
+        Log::info('Processing extracted biomarkers');
+
+        $combinedExtraction = [
+            'extracted_biomarkers' => $uniqueBiomarkerList,
+            'ocr_text' => trim((string) $ocrText),
+            'confidence' => 0.9,
+            'source' => 'openai_responses',
+        ];
+
+        Log::info('Native biomarkers before processExtraction', [
+            'count' => count($uniqueBiomarkerList),
+            'names' => $uniqueBiomarkerNames,
+        ]);
+
+        $result = $this->processExtraction($combinedExtraction, $organTests);
+        
+        Log::info('Biomarkers after processExtraction', [
+            'count' => count($result['extracted_biomarkers'] ?? []),
+            'names' => array_map(
+                fn($item) => $item['name'] ?? $item['marker'] ?? null,
+                $result['extracted_biomarkers'] ?? []
+            ),
+        ]);
+
+        Log::info('Result after processExtraction', [
+            'type' => gettype($result),
+            'keys' => is_array($result) ? array_keys($result) : [],
+        ]);
+
+        Log::info('Native PDF analysis completed successfully');
+        
+        return $result;
+    }
+
+    private function openAiHttpClient(string $apiKey)
+    {
+        $caPath = base_path('cacert.pem');
+
+        Log::info('OpenAI SSL configuration', [
+            'ca_path' => $caPath,
+            'ca_exists' => is_file($caPath),
+            'ca_readable' => is_readable($caPath),
+        ]);
+
+        if (!is_file($caPath) || !is_readable($caPath)) {
+            throw new \RuntimeException(
+                'OpenAI CA certificate bundle not found or not readable: ' . $caPath
+            );
+        }
+
+        return Http::withToken($apiKey)
+            ->acceptJson()
+            ->withOptions([
+                'verify' => $caPath,
+            ]);
+    }
+
+    public function uploadMultiplePdfs(array $files): array
+    {
+        $uploadedFiles = [];
+        foreach ($files as $file) {
+            $uploadedFiles[] = $this->uploadPdfToOpenAI($file);
+        }
+        return $uploadedFiles;
+    }
+
+    public function uploadPdfToOpenAI(UploadedFile $file): array
+    {
+        $mime = $file->getMimeType() ?: '';
+        $extension = strtolower($file->getClientOriginalExtension() ?: '');
+        
+        $isPdf = str_contains($mime, 'pdf') || $extension === 'pdf';
+        $isImage = in_array($extension, ['jpg', 'jpeg', 'png']) || str_starts_with($mime, 'image/');
+
+        if (!$isPdf && !$isImage) {
+            throw new \RuntimeException('Failed to upload document: ' . $file->getClientOriginalName() . ' is not a valid PDF or Image file.');
+        }
+
+        $apiKey = config('services.openai.api_key');
+        if (empty($apiKey)) {
+            throw new \RuntimeException('OpenAI API key is missing.');
+        }
+
+        Log::info('Uploading PDF: ' . $file->getClientOriginalName());
+
+        try {
+            $response = $this->openAiHttpClient($apiKey)
+                ->attach(
+                    'file',
+                    file_get_contents($file->getRealPath()),
+                    $file->getClientOriginalName()
+                )
+                ->post('https://api.openai.com/v1/files', [
+                    'purpose' => 'user_data',
+                ]);
+        } catch (\Exception $e) {
+            throw new \RuntimeException('Failed to upload PDF: ' . $file->getClientOriginalName() . '. Error: ' . $e->getMessage());
+        }
+
+        if (!$response->successful()) {
+            throw new \RuntimeException('Failed to upload PDF: ' . $file->getClientOriginalName() . '. Status: ' . $response->status());
+        }
+
+        $responseData = $response->json();
+        $fileId = $responseData['id'] ?? null;
+
+        if (!$fileId) {
+            throw new \RuntimeException('Failed to upload PDF: ' . $file->getClientOriginalName() . '. OpenAI did not return a file_id.');
+        }
+
+        Log::info('OpenAI file uploaded:', [
+            'filename' => $file->getClientOriginalName(),
+            'file_id' => $fileId,
+        ]);
+
+        return [
+            'original_name' => $file->getClientOriginalName(),
+            'file_id' => $fileId,
+        ];
+    }
+
+    public function analyzeSingleUploadedPdf(array $uploadedFile, string $prompt): array
+    {
+        $apiKey = config('services.openai.api_key');
+        
+        $contents = [
+            [
+                'type' => 'input_text',
+                'text' => $prompt,
+            ],
+            [
+                'type' => 'input_file',
+                'file_id' => $uploadedFile['file_id'],
+            ]
+        ];
+
+        Log::info('Starting individual PDF analysis', [
+            'filename' => $uploadedFile['original_name'] ?? 'unknown',
+            'file_id' => $uploadedFile['file_id'],
+        ]);
+
+        $payload = [
+            'model' => config('services.openai.model', 'gpt-4o'),
+            'input' => [
+                [
+                    'role' => 'user',
+                    'content' => $contents,
+                ],
+            ],
+        ];
+
+        $response = $this->openAiHttpClient($apiKey)
+            ->post('https://api.openai.com/v1/responses', $payload);
+
+        $responseData = $response->json();
+        
+        Log::info('OpenAI Responses API completed for individual PDF', [
+            'filename' => $uploadedFile['original_name'] ?? 'unknown',
+            'file_id' => $uploadedFile['file_id'],
+            'response_id' => $responseData['id'] ?? null,
+            'status' => $responseData['status'] ?? null,
+        ]);
+
+        if (!$response->successful()) {
+            Log::error('OpenAI Responses API failed for individual PDF', [
+                'filename' => $uploadedFile['original_name'] ?? 'unknown',
+                'file_id' => $uploadedFile['file_id'],
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+            throw new \RuntimeException('OpenAI Responses API failed with status ' . $response->status());
+        }
+
+        $outputText = $this->extractResponsesOutputText($responseData);
+        
+        if (empty($outputText)) {
+            Log::error('OpenAI Responses API returned empty output for individual PDF', [
+                'filename' => $uploadedFile['original_name'] ?? 'unknown',
+                'file_id' => $uploadedFile['file_id'],
+                'response_id' => $responseData['id'] ?? null,
+                'status' => $responseData['status'] ?? null,
+            ]);
+            throw new \RuntimeException('OpenAI returned an empty analysis response.');
+        }
+
+        $outputText = trim($outputText);
+        $outputText = preg_replace('/^```json\s*/i', '', $outputText);
+        $outputText = preg_replace('/\s*```$/', '', $outputText);
+        
+        $data = json_decode($outputText, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Log::error('OpenAI lab report analysis returned invalid JSON for individual PDF', [
+                'filename' => $uploadedFile['original_name'] ?? 'unknown',
+                'file_id' => $uploadedFile['file_id'],
+                'json_error' => json_last_error_msg(),
+                'response_id' => $responseData['id'] ?? null,
+                'preview' => mb_substr($outputText, 0, 500, 'UTF-8'),
+            ]);
+            throw new \RuntimeException('OpenAI lab report analysis returned invalid JSON');
+        }
+
+        if (!isset($data['biomarkers']) || !is_array($data['biomarkers'])) {
+            throw new \RuntimeException('OpenAI response does not contain a valid biomarkers array.');
+        }
+
+        $biomarkers = $data['biomarkers'];
+        
+        Log::info('Individual PDF extraction completed', [
+            'filename' => $uploadedFile['original_name'] ?? 'unknown',
+            'file_id' => $uploadedFile['file_id'],
+            'biomarker_count' => count($biomarkers),
+            'biomarker_names' => array_column($biomarkers, 'name'),
+        ]);
+
+        Log::info('Individual PDF extraction validation', [
+            'filename' => $uploadedFile['original_name'] ?? 'unknown',
+            'expected_file_id' => $uploadedFile['file_id'],
+            'extracted_count' => count($biomarkers),
+        ]);
+
+        return $biomarkers;
+    }
+
+    private function extractResponsesOutputText(array $responseData): string
+    {
+        if (
+            isset($responseData['output_text']) &&
+            is_string($responseData['output_text']) &&
+            trim($responseData['output_text']) !== ''
+        ) {
+            return trim($responseData['output_text']);
+        }
+
+        $texts = [];
+
+        foreach (($responseData['output'] ?? []) as $outputItem) {
+
+            if (($outputItem['type'] ?? null) !== 'message') {
+                continue;
+            }
+
+            foreach (($outputItem['content'] ?? []) as $contentItem) {
+
+                if (($contentItem['type'] ?? null) !== 'output_text') {
+                    continue;
+                }
+
+                $text = $contentItem['text'] ?? '';
+
+                if (is_string($text) && trim($text) !== '') {
+                    $texts[] = trim($text);
+                }
+            }
+        }
+
+        return trim(implode("\n", $texts));
+    }
+
     public function analyze(?UploadedFile $file, ?string $ocrText, Collection $organTests): array
     {
         $extraction = $this->extractFromDocument($file, $ocrText);
+        return $this->processExtraction($extraction, $organTests);
+    }
+
+    protected function processExtraction(array $extraction, Collection $organTests): array
+    {
         $extractedBiomarkers = $extraction['extracted_biomarkers'];
         
         $extractedNames = [];
@@ -150,6 +602,7 @@ class LabReportBiomarkerAnalyzerService
                     'name' => $item['name'],
                     'price' => $item['price'],
                     'confidence' => $this->score((float) $item['confidence']),
+                    'biomarkers' => $item['biomarkers'] ?? [],
                 ];
             }, $missing),
             
@@ -197,24 +650,6 @@ class LabReportBiomarkerAnalyzerService
             }
         }
 
-        $ocrSpaceResult = $file ? $this->extractWithOcrSpace($file) : null;
-        
-        // If OCR.space succeeded, it gives us the raw OCR text. 
-        // We must pass this raw text to OpenAI to extract the structured JSON (with values, units, and ranges).
-        if ($ocrSpaceResult !== null && !empty($apiKey)) {
-            $ocrTextFromSpace = $ocrSpaceResult['ocr_text'] ?? '';
-            if ($ocrTextFromSpace !== '') {
-                $openAiRetry = $this->extractWithOpenAi($file, $ocrTextFromSpace);
-                if ($openAiRetry !== null) {
-                    return $openAiRetry;
-                }
-            }
-        }
-
-        if ($ocrSpaceResult !== null) {
-            return $ocrSpaceResult;
-        }
-
         // If we had a valid OpenAI result but it just had 0 biomarkers, return it as a last resort before text fallbacks
         if ($initialOpenAiResult !== null) {
             return $initialOpenAiResult;
@@ -243,102 +678,11 @@ class LabReportBiomarkerAnalyzerService
         }
 
         throw new \RuntimeException(
-            'Unable to analyze document. OCR failed. Set OPENAI_API_KEY or OCR_SPACE_API_KEY in .env, or send ocr_text with the request.'
+            'Unable to analyze document. OCR failed. Set OPENAI_API_KEY in .env, or send ocr_text with the request.'
         );
     }
 
-    /**
-     * Free OCR fallback via OCR.space (works for images/PDFs without OpenAI).
-     *
-     * @return array{extracted_biomarkers: string[], ocr_text: string, confidence: float, source: string}|null
-     */
-    protected function extractWithOcrSpace(UploadedFile $file): ?array
-    {
-        $apiKey = (string) config('services.ocr_space.api_key', 'helloworld');
-        $endpoint = (string) config('services.ocr_space.endpoint', 'https://api.ocr.space/parse/image');
 
-        if ($apiKey === '') {
-            return null;
-        }
-
-        $mime = $file->getMimeType() ?: 'image/jpeg';
-        $extension = strtolower($file->getClientOriginalExtension() ?: 'jpg');
-        $fileTypeMap = [
-            'jpg' => 'JPG',
-            'jpeg' => 'JPG',
-            'png' => 'PNG',
-            'webp' => 'PNG',
-            'gif' => 'GIF',
-            'pdf' => 'PDF',
-            'tif' => 'TIF',
-            'tiff' => 'TIF',
-            'bmp' => 'BMP',
-        ];
-        $fileType = $fileTypeMap[$extension] ?? 'JPG';
-
-        if (str_contains($mime, 'pdf')) {
-            $mime = 'application/pdf';
-            $fileType = 'PDF';
-        } elseif (!str_starts_with($mime, 'image/')) {
-            $mime = 'image/jpeg';
-        }
-
-        $base64 = base64_encode((string) file_get_contents($file->getRealPath()));
-        $dataUrl = 'data:' . $mime . ';base64,' . $base64;
-
-        try {
-            $response = Http::timeout(240)
-                ->withoutVerifying()
-                ->asMultipart()
-                ->withHeaders(['apikey' => $apiKey])
-                ->post($endpoint, [
-                    ['name' => 'base64Image', 'contents' => $dataUrl],
-                    ['name' => 'language', 'contents' => 'eng'],
-                    ['name' => 'isOverlayRequired', 'contents' => 'false'],
-                    ['name' => 'OCREngine', 'contents' => '2'],
-                    ['name' => 'scale', 'contents' => 'true'],
-                    ['name' => 'filetype', 'contents' => $fileType],
-                ]);
-
-            if (!$response->successful()) {
-                Log::error('OCR.space request failed', [
-                    'status' => $response->status(),
-                    'body' => $response->body(),
-                ]);
-                return null;
-            }
-
-            $json = $response->json();
-            if (!empty($json['IsErroredOnProcessing'])) {
-                Log::error('OCR.space processing error', [
-                    'message' => $json['ErrorMessage'] ?? $json['ErrorDetails'] ?? null,
-                    'body' => $json,
-                ]);
-                return null;
-            }
-
-            $parsedText = '';
-            foreach (($json['ParsedResults'] ?? []) as $result) {
-                $parsedText .= trim((string) ($result['ParsedText'] ?? '')) . "\n";
-            }
-            $parsedText = trim($parsedText);
-
-            if ($parsedText === '') {
-                Log::warning('OCR.space returned empty text');
-                return null;
-            }
-
-            return [
-                'extracted_biomarkers' => $this->extractBiomarkerNamesFromText($parsedText),
-                'ocr_text' => $parsedText,
-                'confidence' => 0.8,
-                'source' => 'ocr_space',
-            ];
-        } catch (\Throwable $e) {
-            Log::error('OCR.space exception', ['message' => $e->getMessage()]);
-            return null;
-        }
-    }
 
     /**
      * @return array{extracted_biomarkers: string[], ocr_text: string, confidence: float, source: string}|null
@@ -450,16 +794,47 @@ class LabReportBiomarkerAnalyzerService
     protected function buildOpenAiVisionPayload(string $dataUrl, string $existingOcrText): array
     {
         $system = $this->analystSystemPrompt();
-        $userText = 'Analyze this lab report image. Extract every test/biomarker name found. '
-            . 'Compare meaning, ignore punctuation/capitalization/OCR typos. '
-            . 'Return ONLY valid JSON.';
+        $userText = <<<PROMPT
+You are analyzing a laboratory image document.
+
+Analyze the ENTIRE image.
+Extract EVERY laboratory biomarker/test present.
+Do not stop after finding common biomarkers.
+Do not return only biomarkers relevant to SenoClock.
+Do not return only biomarkers matching the database.
+Do not summarize the report.
+Do not select a subset.
+Preserve every biomarker found.
+Include biomarker name.
+Include value.
+Include unit.
+Include reference range.
+
+Return ONLY valid JSON.
+
+Required structure:
+{
+  "extracted_biomarkers": [
+    {
+      "name": "Hemoglobin (Hb)",
+      "value": "14.2",
+      "unit": "g/dL",
+      "range": "13.0 - 17.0"
+    }
+  ]
+}
+
+Do not invent values.
+Do not invent reference ranges.
+Do not normalize away clinically distinct tests.
+PROMPT;
 
         if ($existingOcrText !== '') {
             $userText .= "\n\nAdditional OCR text provided by client:\n" . $existingOcrText;
         }
 
         return [
-            'model' => config('services.openai.model', 'gpt-4o-mini'),
+            'model' => config('services.openai.model', 'gpt-4o'),
             'temperature' => 0.3,
             'max_tokens' => 2000,
             'response_format' => ['type' => 'json_object'],
@@ -469,7 +844,7 @@ class LabReportBiomarkerAnalyzerService
                     'role' => 'user',
                     'content' => [
                         ['type' => 'text', 'text' => $userText],
-                        ['type' => 'image_url', 'image_url' => ['url' => $dataUrl]],
+                        ['type' => 'image_url', 'image_url' => ['url' => $dataUrl, 'detail' => 'high']],
                     ],
                 ],
             ],

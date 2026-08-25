@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width" />
-    <title>VitalScan Report</title>
+    <title>Tourist VitalScan Report</title>
     <style>
         @page {
             size: A4 portrait;
@@ -324,50 +324,54 @@
 <body>
 
     @php
-        function getPillColor($value, $min = null, $max = null, $tolerance = 10)
-        {
-            if (is_null($value)) {
-                return '#cbd5e1'; // missing value
-            }
-
-            if (!is_null($min) && !is_null($max)) {
-                if ($value >= $min && $value <= $max) {
-                    return '#28a745'; // within range
-                } elseif ($value > $max && $value <= $max + $tolerance) {
-                    return '#ffbf47'; // slightly above
-                } else {
-                    return '#f0524d'; // out of range
+        if (!function_exists('getPillColor')) {
+            function getPillColor($value, $min = null, $max = null, $tolerance = 10)
+            {
+                if (is_null($value)) {
+                    return '#cbd5e1'; // missing value
                 }
-            }
 
-            return '#28a745'; // default green if no range
+                if (!is_null($min) && !is_null($max)) {
+                    if ($value >= $min && $value <= $max) {
+                        return '#28a745'; // within range
+                    } elseif ($value > $max && $value <= $max + $tolerance) {
+                        return '#ffbf47'; // slightly above
+                    } else {
+                        return '#f0524d'; // out of range
+                    }
+                }
+
+                return '#28a745'; // default green if no range
+            }
         }
     @endphp
 
     @php
-        function worstColor($colors)
-        {
-            // severity ranking
-            $rank = [
-                '#f0524d' => 3, // red - worst
-                '#ffbf47' => 2, // amber - medium
-                '#28a745' => 1, // green - good
-                '#cbd5e1' => 0, // gray - missing
-            ];
+        if (!function_exists('worstColor')) {
+            function worstColor($colors)
+            {
+                // severity ranking
+                $rank = [
+                    '#f0524d' => 3, // red - worst
+                    '#ffbf47' => 2, // amber - medium
+                    '#28a745' => 1, // green - good
+                    '#cbd5e1' => 0, // gray - missing
+                ];
 
-            $worst = '#28a745';
-            $worstRank = -1;
+                $worst = '#28a745';
+                $worstRank = -1;
 
-            foreach ($colors as $c) {
-                $c = strtolower($c);
-                $r = $rank[$c] ?? -1;
-                if ($r > $worstRank) {
-                    $worstRank = $r;
-                    $worst = $c;
+                foreach ($colors as $c) {
+                    $c = strtolower($c);
+                    $r = $rank[$c] ?? -1;
+                    if ($r > $worstRank) {
+                        $worstRank = $r;
+                        $worst = $c;
+                    }
                 }
-            }
 
-            return $worst;
+                return $worst;
+            }
         }
     @endphp
 

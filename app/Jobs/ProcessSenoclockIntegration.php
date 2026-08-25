@@ -47,22 +47,58 @@ class ProcessSenoclockIntegration implements ShouldQueue
     {
         try {
             $labReport = LabReport::find($this->labReportId);
+
+            $testDateRaw = $labReport && $labReport->created_at ? $labReport->created_at->format('Y-m-d') : date('Y-m-d');
+            
+            Log::info('ProcessSenoclockIntegration: Starting', [
+                'lab_report_id' => $this->labReportId,
+                'user_id' => $labReport ? $labReport->user_id : null,
+                'test_date' => $testDateRaw,
+                'application_now' => now()->toDateTimeString(),
+                'application_timezone' => config('app.timezone'),
+                'application_today' => now()->toDateString(),
+                'utc_now' => now()->utc()->toDateTimeString(),
+                'utc_today' => now()->utc()->toDateString(),
+            ]);
+
             if (!$labReport) {
                 Log::error("ProcessSenoclockIntegration: LabReport not found", ['lab_report_id' => $this->labReportId]);
                 return;
             }
 
-            // Locate the PDF
-            $documentPath = public_path($labReport->document_path);
-            if (!file_exists($documentPath)) {
-                $documentPath = storage_path('app/public/' . ltrim($labReport->document_path ?? '', '/'));
-            }
-            if (!file_exists($documentPath)) {
-                $documentPath = storage_path('app/' . ltrim($labReport->document_path ?? '', '/'));
+            // Locate the PDFs
+            $documentPaths = [];
+            
+            // Collect paths from analysis_response if available, otherwise fallback to single document_path
+            $analysisResponse = $labReport->analysis_response ?? [];
+            if (!empty($analysisResponse['document_paths'])) {
+                foreach ($analysisResponse['document_paths'] as $path) {
+                    $fullPath = public_path($path);
+                    if (!file_exists($fullPath)) {
+                        $fullPath = storage_path('app/public/' . ltrim($path, '/'));
+                    }
+                    if (!file_exists($fullPath)) {
+                        $fullPath = storage_path('app/' . ltrim($path, '/'));
+                    }
+                    if (file_exists($fullPath)) {
+                        $documentPaths[] = $fullPath;
+                    }
+                }
+            } else {
+                $singlePath = public_path($labReport->document_path);
+                if (!file_exists($singlePath)) {
+                    $singlePath = storage_path('app/public/' . ltrim($labReport->document_path ?? '', '/'));
+                }
+                if (!file_exists($singlePath)) {
+                    $singlePath = storage_path('app/' . ltrim($labReport->document_path ?? '', '/'));
+                }
+                if (file_exists($singlePath)) {
+                    $documentPaths[] = $singlePath;
+                }
             }
 
-            if (!file_exists($documentPath)) {
-                Log::error("ProcessSenoclockIntegration: Original PDF not found for LabReport #{$labReport->id}");
+            if (empty($documentPaths)) {
+                Log::error("ProcessSenoclockIntegration: Original PDFs not found for LabReport #{$labReport->id}");
                 return;
             }
 
@@ -73,7 +109,7 @@ class ProcessSenoclockIntegration implements ShouldQueue
             }
 
             // PUT /dl-api/file-upload/
-            $senoclockId = $senoclockService->uploadDocument($documentPath);
+            $senoclockId = $senoclockService->uploadDocument($documentPaths);
             if (!$senoclockId) {
                 Log::error("ProcessSenoclockIntegration: PDF upload failed");
                 return;
@@ -133,33 +169,17 @@ class ProcessSenoclockIntegration implements ShouldQueue
                 }
             }
 
-            // 3. Filter markers (Intersection)
-            $filteredMarkers = [];
-            foreach ($availableKeys as $markerKey) {
-                if (isset($normalizedExtractedMarkers[$markerKey])) {
-                    $filteredMarkers[$markerKey] = $normalizedExtractedMarkers[$markerKey];
-                }
-            }
+            // 3. Do not filter by availableKeys. Send all extracted markers directly!
+            $filteredMarkers = $normalizedExtractedMarkers;
 
             $filteredMarkerCount = count($filteredMarkers);
 
             Log::info('SenoclockService: Final marker filtering', [
                 'extracted_marker_count' => count($extractedMarkers),
                 'normalized_extracted_markers' => array_keys($normalizedExtractedMarkers),
-                'available_marker_count' => count($availableKeys),
                 'filtered_marker_count' => count($filteredMarkers),
                 'sent_markers' => array_keys($filteredMarkers),
             ]);
-
-            // 4. Validate before execution (Do NOT send empty markers if available_count > 0)
-            if ($availableCount > 0 && empty($filteredMarkers)) {
-                Log::error('SenoclockService: No matching available markers found', [
-                    'available_count' => $availableCount,
-                    'available_markers' => $availableKeys,
-                    'extracted_markers' => array_keys($extractedMarkers),
-                ]);
-                return; // Stop execution to prevent file-execute with empty markers
-            }
 
             // APP BUSINESS RULE: Minimum 16 markers required for report generation
             if ($filteredMarkerCount < 16) {
@@ -210,24 +230,74 @@ class ProcessSenoclockIntegration implements ShouldQueue
                 $age = $user->dob ? \Carbon\Carbon::parse($user->dob)->age : 25;
                 $gender = $this->mapSex($user->gender ?? null);
             }
-            $testDate = $labReport->created_at ? $labReport->created_at->format('Y-m-d') : date('Y-m-d');
+            
+            $originalTestDate = $labReport->created_at ? $labReport->created_at->format('Y-m-d') : date('Y-m-d');
+            $senoclockTestDate = $originalTestDate;
+            
+            if ($originalTestDate >= now()->toDateString()) {
+                $senoclockTestDate = now()->subDay()->toDateString();
+                Log::warning('SenoclockService: Test date normalized for API', [
+                    'original_test_date' => $originalTestDate,
+                    'senoclock_test_date' => $senoclockTestDate,
+                    'reason' => 'SenoClock requires test_date to be strictly earlier than today',
+                ]);
+            }
+
             $externalId = strval($labReport->user_id);
-            $vitals = is_array($labReport->vitals) ? $labReport->vitals : [];
+            $vitals = [];
+            $analysisResponse = $labReport->analysis_response ?? [];
+            foreach (['height', 'weight', 'blood_pressure', 'allergies'] as $field) {
+                if (isset($analysisResponse[$field])) {
+                    $vitals[$field] = $analysisResponse[$field];
+                }
+            }
+
+            Log::info('ProcessSenoclockIntegration: Preparing payload', [
+                'lab_report_id' => $this->labReportId,
+                'test_date' => $senoclockTestDate,
+                'marker_count' => count($senoclockMarkers),
+                'marker_names' => array_keys($senoclockMarkers),
+            ]);
+
+            // Log exact payload safely
+            Log::info("SenoclockService: Executing Senoclock Analysis", [
+                'id' => $senoclockId,
+                'external_id' => $externalId,
+                'age' => $age,
+                'gender' => $gender,
+                'test_date' => $senoclockTestDate,
+                'vitals' => $vitals,
+                'markers' => $senoclockMarkers,
+            ]);
 
             // POST /dl-api/file-execute/
-            $executionSuccess = $senoclockService->executeAlgorithm($senoclockId, $externalId, $age, $gender, $testDate, $senoclockMarkers, $vitals);
+            $executionSuccess = $senoclockService->executeAlgorithm($senoclockId, $externalId, $age, $gender, $senoclockTestDate, $senoclockMarkers, $vitals);
 
             if (!$executionSuccess) {
-                Log::error("ProcessSenoclockIntegration: Execution failed for LabReport #{$labReport->id}");
+                Log::error('ProcessSenoclockIntegration: SenoClock execution failed', [
+                    'lab_report_id' => $this->labReportId,
+                    'test_date' => $senoclockTestDate ?? $originalTestDate,
+                    'marker_count' => count($senoclockMarkers),
+                    'response_status' => null, // Note: handled inside executeAlgorithm
+                ]);
+                Log::error("ProcessSenoclockIntegration: Execution failed for LabReport #{$this->labReportId}");
+                $labReport->status = Constants::STATUS_REPORT_FAILED;
+                $labReport->save();
                 return;
             }
+
+            Log::info('ProcessSenoclockIntegration: SenoClock execution successful', [
+                'lab_report_id' => $this->labReportId,
+                'test_date' => $senoclockTestDate,
+                'marker_count' => count($senoclockMarkers),
+            ]);
             
             // Wait before trying to download the generated PDF
             sleep(5);
 
             // GET /dl-api/report/download/?pdf_report=true&id=senoclock_id
-            $destinationDir = public_path('uploads/senoclock');
-            $downloadResult = $senoclockService->downloadPdfWithRetry($senoclockId, $destinationDir, $externalId, 12, 5);
+            $destinationDir = public_path('uploads/senoclock_report_generated');
+            $downloadResult = $senoclockService->downloadPdfWithRetry($senoclockId, $destinationDir, $externalId, 30, 5);
 
             if (!$downloadResult['success']) {
                 Log::error("ProcessSenoclockIntegration: PDF download failed", ['error' => $downloadResult['error']]);
@@ -235,7 +305,7 @@ class ProcessSenoclockIntegration implements ShouldQueue
             }
 
             // Save PDF locally and update senoclock_pdf_path
-            $labReport->senoclock_pdf_path = 'uploads/senoclock/' . $downloadResult['path'];
+            $labReport->senoclock_pdf_path = 'uploads/senoclock_report_generated/' . $downloadResult['path'];
             $labReport->senoclock_status = 'completed';
             $labReport->senoclock_generated_at = now();
             $labReport->save();
@@ -262,6 +332,9 @@ class ProcessSenoclockIntegration implements ShouldQueue
                         'user_id' => $labReport->user_id,
                         'report_id' => $vital->id,
                     ]);
+                    
+                    // Temporarily increase memory limit for DOMPDF generation
+                    ini_set('memory_limit', '1024M');
                     app(\App\Http\Controllers\v1\NewShenaiCareController::class)->longevityReportPdf($request);
                 } else {
                     Log::warning("ProcessSenoclockIntegration: Could not trigger longevityReportPdf, no AI_Vital found for user #{$labReport->user_id}");

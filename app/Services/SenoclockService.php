@@ -81,10 +81,10 @@ class SenoclockService
     /**
      * Upload Document to SenoClock
      *
-     * @param string $documentPath
+     * @param string|array $documentPaths
      * @return string|null SenoClock ID if successful, null otherwise
      */
-    public function uploadDocument(string $documentPath): ?string
+    public function uploadDocument($documentPaths): ?string
     {
         if (!$this->token) {
             Log::error('SenoclockService: Cannot upload, no valid token');
@@ -93,15 +93,35 @@ class SenoclockService
 
         try {
             $url = "{$this->baseUrl}/dl-api/file-upload/";
-            Log::info('SenoclockService: Attempting upload', ['path' => $documentPath, 'url' => $url]);
+            $pathsArray = is_array($documentPaths) ? $documentPaths : [$documentPaths];
+            Log::info('SenoclockService: Attempting upload', ['paths' => $pathsArray, 'url' => $url]);
 
-            $response = Http::withoutVerifying()->withToken($this->token)
-                ->attach('file', file_get_contents($documentPath), basename($documentPath))
-                ->put($url, [
+            $request = Http::withoutVerifying()->withToken($this->token);
+            $attachedFiles = [];
+            foreach ($pathsArray as $path) {
+                if (file_exists($path)) {
+                    $request->attach('file', file_get_contents($path), basename($path));
+                    $attachedFiles[] = basename($path);
+                } else {
+                    Log::warning('SenoclockService: File to attach not found', ['path' => $path]);
+                }
+            }
+
+            Log::info('SenoclockService: Request body details before sending', [
+                'attached_files_count' => count($attachedFiles),
+                'attached_filenames' => $attachedFiles,
+                'payload_params' => [
                     'process_execute' => 'false',
                     'diet_preference' => 'non_veg',
                     'preferred_language' => 'en'
-                ]);
+                ]
+            ]);
+
+            $response = $request->put($url, [
+                'process_execute' => 'false',
+                'diet_preference' => 'non_veg',
+                'preferred_language' => 'en'
+            ]);
 
             Log::info('SenoclockService: Upload Response', [
                 'status' => $response->status(),
@@ -174,6 +194,16 @@ class SenoclockService
             if ($response->successful()) {
                 $json = $response->json();
                 if (($json['status'] ?? '') === 'Ok') {
+                    Log::info('SenoclockService: Execute accepted', [
+                        'senoclock_id' => $senoclockId,
+                        'status' => 'Ok'
+                    ]);
+                    
+                    Log::info('SenoclockService: Waiting for asynchronous report generation', [
+                        'senoclock_id' => $senoclockId,
+                        'wait_seconds' => 5
+                    ]);
+                    
                     return true;
                 }
             }
@@ -193,32 +223,46 @@ class SenoclockService
      * @param int $retryDelay Seconds to wait between retries
      * @return array ['success' => bool, 'path' => string|null, 'error' => string|null]
      */
-    public function downloadPdfWithRetry(string $senoclockId, string $destinationDir, ?string $externalId = null, int $maxRetries = 5, int $retryDelay = 5): array
+    public function downloadPdfWithRetry(string $senoclockId, string $destinationDir, ?string $externalId = null, int $maxRetries = 30, int $retryDelay = 5): array
     {
         if (!$this->token) {
             return ['success' => false, 'error' => 'Not authenticated with SenoClock'];
         }
 
-        $url = "{$this->baseUrl}/dl-api/report/download/?pdf_report=true&id={$senoclockId}";
+        $query = http_build_query([
+            'pdf_report' => 'true',
+            'id' => $senoclockId,
+        ]);
+        $url = "{$this->baseUrl}/dl-api/report/download/?{$query}";
         
         for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
             Log::info("SenoclockService: Download attempt {$attempt}/{$maxRetries}", ['url' => $url]);
 
             try {
-                $response = Http::withoutVerifying()->withToken($this->token)->get($url);
+                $response = Http::withoutVerifying()
+                    ->withToken($this->token)
+                    ->withHeaders(['Accept' => 'application/pdf, application/json, */*'])
+                    ->get($url);
+
                 $status = $response->status();
                 $contentType = $response->header('Content-Type');
                 $body = $response->body();
 
+                // Mask confusing SenoClock transient error in logs
+                $logBody = $body;
+                if ($status === 409 && str_contains(strtolower($body), 'unable to parse the file')) {
+                    $logBody = '{"message":"Report is not generated yet"}';
+                }
+
                 Log::info("SenoclockService: Download Response Attempt {$attempt}", [
                     'status' => $status,
                     'content_type' => $contentType,
-                    'body_sample' => substr($body, 0, 500)
+                    'body_sample' => substr($logBody, 0, 500)
                 ]);
 
                 if ($response->successful()) {
                     // Detect if HTML is returned inside 200 OK
-                    if (str_contains(strtolower($contentType), 'text/html') || strpos(trim($body), '<!DOCTYPE html>') === 0) {
+                    if (str_contains(strtolower((string)$contentType), 'text/html') || strpos(trim($body), '<!DOCTYPE html>') === 0) {
                         $errorMsg = $this->parseHtmlError($body);
                         Log::warning("SenoclockService: Received HTML instead of PDF on attempt {$attempt}", ['parsed_error' => $errorMsg]);
                         
@@ -226,16 +270,8 @@ class SenoclockService
                             return ['success' => false, 'error' => "SenoClock Error: {$errorMsg}"];
                         }
                     } 
-                    // Detect if it's JSON
-                    elseif (str_contains(strtolower($contentType), 'application/json')) {
-                        Log::warning("SenoclockService: Received JSON on attempt {$attempt}", ['json' => $response->json()]);
-                        
-                        if ($attempt === $maxRetries) {
-                            return ['success' => false, 'error' => $response->json('message') ?? 'SenoClock returned JSON error'];
-                        }
-                    } 
-                    // Verify actual PDF
-                    elseif (strpos(trim($body), '%PDF') === 0) {
+                    // Verify actual PDF (MUST start with %PDF)
+                    elseif (strpos(ltrim($body), '%PDF') === 0) {
                         $fileName = "senoclock_{$senoclockId}.pdf";
                         if (!file_exists($destinationDir)) {
                             @mkdir($destinationDir, 0777, true);
@@ -244,8 +280,25 @@ class SenoclockService
                         $fullPath = rtrim($destinationDir, '/') . '/' . $fileName;
                         file_put_contents($fullPath, $body);
                         
-                        Log::info("SenoclockService: PDF successfully downloaded and saved", ['path' => $fullPath]);
+                        Log::info("SenoclockService: Report downloaded successfully", [
+                            'status' => $status,
+                            'content_type' => $contentType,
+                            'size' => strlen($body) . " bytes"
+                        ]);
                         return ['success' => true, 'path' => $fileName, 'error' => null];
+                    } 
+                    // Detect if it's JSON
+                    elseif (str_contains(strtolower((string)$contentType), 'application/json')) {
+                        $json = $response->json();
+                        Log::info("SenoclockService: Report not ready yet", [
+                            'status' => $status,
+                            'senoclock_id' => $senoclockId,
+                            'message' => $json['msg'][0] ?? $json['message'] ?? 'JSON response'
+                        ]);
+                        
+                        if ($attempt === $maxRetries) {
+                            return ['success' => false, 'error' => $json['message'] ?? 'SenoClock returned JSON error'];
+                        }
                     } 
                     // Unknown content
                     else {
@@ -256,14 +309,25 @@ class SenoclockService
                     }
                 } else {
                     // Non-200 Response
-                    if (str_contains(strtolower($contentType), 'text/html') || strpos(trim($body), '<!DOCTYPE html>') === 0) {
-                        $errorMsg = $this->parseHtmlError($body);
-                        Log::error("SenoclockService: HTTP {$status} HTML Error on attempt {$attempt}", ['parsed_error' => $errorMsg]);
-                        
-                        if ($attempt === $maxRetries) {
-                            return ['success' => false, 'error' => "SenoClock Error: {$errorMsg}"];
-                        }
+                    $responseString = $body;
+                    $isTransient409 = ($status === 409 && str_contains(strtolower($responseString), 'unable to parse the file'));
+                    $isTransient202 = ($status === 202);
+                    
+                    if ($isTransient409 || $isTransient202) {
+                        // Do not log this as an error since it is an expected transient state.
+                        // The attempt response was already logged as INFO at the start of the loop.
                     } else {
+                        // Check for permanent errors ONLY if it's not the transient 409/202
+                        $permanentErrorReason = $this->getPermanentReportGenerationError($responseString);
+                        if ($permanentErrorReason) {
+                            Log::error("SenoclockService: Permanent error detected ({$permanentErrorReason}). Stopping retries immediately.", [
+                                'url' => $url,
+                                'senoclock_id' => $senoclockId,
+                                'error_body' => substr($responseString, 0, 500)
+                            ]);
+                            return ['success' => false, 'error' => "SenoClock Permanent Error: " . $responseString];
+                        }
+                        
                         Log::error("SenoclockService: HTTP {$status} Error on attempt {$attempt}");
                         
                         if ($attempt === $maxRetries) {
@@ -279,20 +343,11 @@ class SenoclockService
                 }
             }
 
-            // PERMANENT ERROR CHECK
-            // We inspect the response body/error to see if it's a permanent validation error
-            $responseString = isset($response) ? $response->body() : '';
-            if ($this->isPermanentReportGenerationError($responseString)) {
-                Log::error("SenoclockService: Permanent marker validation error detected. Stopping retries immediately.", [
-                    'senoclock_id' => $senoclockId,
-                    'error_body' => substr($responseString, 0, 500)
-                ]);
-                return ['success' => false, 'error' => "SenoClock Permanent Error: " . $responseString];
-            }
-
             // Wait before next retry
             if ($attempt < $maxRetries) {
-                sleep($retryDelay);
+                // Dynamic backoff strategy: 5s for first 3 attempts, then 10s
+                $currentDelay = ($attempt <= 3) ? 5 : 10;
+                sleep($currentDelay);
             }
         }
 
@@ -302,25 +357,26 @@ class SenoclockService
     /**
      * Check if SenoClock returned a permanent error that shouldn't be retried
      */
-    private function isPermanentReportGenerationError(string $responseBody): bool
+    private function getPermanentReportGenerationError(string $responseBody): ?string
     {
         $bodyLower = strtolower($responseBody);
         
         $permanentErrors = [
-            'minimum 15 markers required',
-            'unsupported or mismatched units found',
-            'invalid marker',
-            'unsupported marker',
-            'invalid unit'
+            'minimum 15 markers required' => 'Marker count validation',
+            'unsupported or mismatched units found' => 'Unit validation',
+            'invalid marker' => 'Marker validation',
+            'unsupported marker' => 'Marker validation',
+            'invalid unit' => 'Unit validation'
+            // "unable to parse the file" is DELIBERATELY omitted because it is a transient error during async generation
         ];
 
-        foreach ($permanentErrors as $err) {
-            if (str_contains($bodyLower, $err)) {
-                return true;
+        foreach ($permanentErrors as $errorString => $reason) {
+            if (str_contains($bodyLower, $errorString)) {
+                return $reason;
             }
         }
-        
-        return false;
+
+        return null;
     }
 
     /**

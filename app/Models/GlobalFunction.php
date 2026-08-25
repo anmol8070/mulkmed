@@ -1366,7 +1366,7 @@ class GlobalFunction extends Model
 
     public static function GeneratePatientJitsiMeetingLink($appointment, $room, $endTimestamp){
         $roomId = self::jitsiRoomIdPrefix() . '_' . $appointment->id;
-        $isModerator = self::jitsiJwtModeratorForRole(false);
+        $isModerator = true;
         $payload = self::buildJitsiJwtPayload((object) [
                     'appointment_id' => $appointment->id,
                     'role' => 'patient',
@@ -1407,7 +1407,7 @@ class GlobalFunction extends Model
 
     public static function GenerateTouristJitsiMeetingLink($appointment, $room, $endTimestamp){
         $roomId = self::jitsiRoomIdPrefix() . '_tourist_' . $appointment->id;
-        $isModerator = self::jitsiJwtModeratorForRole(false);
+        $isModerator = true;
         $payload = self::buildJitsiJwtPayload((object) [
                     'appointment_id' => $appointment->id,
                     'role' => 'tourist',

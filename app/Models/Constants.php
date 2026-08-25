@@ -144,6 +144,7 @@ final class Constants
     const CCAvenueMesaBeforeChatPayment = 'mesabeforechatpayment';
 
     const CCAvenueLongevityPaymentType = 'longevitypayment';
+    const CCAvenueMajorOrganPaymentType = 'majororganpayment';
 
     const meetingDurationInMinutes = 60;
  

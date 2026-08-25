@@ -730,12 +730,16 @@ class SenoclockAiService
 
             $executePayload = [
                 'id' => $fileId,
-                'external_id' => strval($labReport->user_id),
+                'external_id' => (string) $labReport->user_id,
                 'dob' => $dob,
                 'age' => $age,
                 'gender' => $gender,
                 'test_date' => $testDate,
-                'markers' => $senoclockMarkers,
+                'height' => $analysisResponse['height'] ?? null,
+                'weight' => $analysisResponse['weight'] ?? null,
+                'blood_pressure' => $analysisResponse['blood_pressure'] ?? null,
+                'allergies' => $analysisResponse['allergies'] ?? null,
+                'markers' => (object) $senoclockMarkers,
             ];
 
             $executeJson = $this->executeSenoclockAnalysis($fileId, $executePayload, $token);
@@ -805,13 +809,21 @@ class SenoclockAiService
         $baseUrl = rtrim((string) config('services.senoclock.base_url'), '/');
         $url = "{$baseUrl}/dl-api/file-upload/";
 
+        $payload = [
+            'process_execute' => 'true',
+            'diet_preference' => 'non_veg',
+            'preferred_language' => 'en'
+        ];
+
+        Log::info("Senoclock AI upload sending payload to {$url}", [
+            'file_name' => basename($filePath),
+            'file_size_bytes' => filesize($filePath),
+            'payload' => $payload
+        ]);
+
         $response = Http::withoutVerifying()->withToken($token)
             ->attach('file', file_get_contents($filePath), basename($filePath))
-            ->put($url, [
-                'process_execute' => 'true',
-                'diet_preference' => 'non_veg',
-                'preferred_language' => 'en'
-            ]);
+            ->put($url, $payload);
 
         if (!$response->successful()) {
             Log::error("Senoclock AI upload failed: " . $response->body());
@@ -936,6 +948,10 @@ class SenoclockAiService
             // HDL - HDL Cholestrol
             'hdl cholestrol' => 'HDL',
             'hdl cholesterol' => 'HDL',
+            'hdl cholesterol (good)' => 'HDL',
+            'hdl-c' => 'HDL',
+            'high density lipoprotein' => 'HDL',
+            'high-density lipoprotein' => 'HDL',
             'hdl' => 'HDL',
             
             // HGB - Hemoglobin
@@ -959,6 +975,10 @@ class SenoclockAiService
             
             // LDL - LDL Cholesterol
             'ldl cholesterol' => 'LDL',
+            'ldl cholesterol (bad)' => 'LDL',
+            'ldl-c' => 'LDL',
+            'low density lipoprotein' => 'LDL',
+            'low-density lipoprotein' => 'LDL',
             'ldl' => 'LDL',
             
             // LYMPH% - Lymphocytes,%
@@ -1089,28 +1109,23 @@ class SenoclockAiService
     public function convertBiomarkersToSenoclockFormat(array $availableBiomarkers, array $extractedBiomarkers = []): array
     {
         $mapping = $this->getSenoclockMapping();
-
         $extractedMap = [];
-        $extractedSenoclockMap = [];
+
         foreach ($extractedBiomarkers as $extracted) {
-            $normName = '';
             if (is_array($extracted) && !empty($extracted['name'])) {
                 $normName = strtolower(trim($extracted['name']));
-                $extractedMap[$normName] = $extracted;
+                if (!isset($extractedMap[$normName])) {
+                    $extractedMap[$normName] = $extracted;
+                }
             } elseif (is_string($extracted)) {
                 $normName = strtolower(trim($extracted));
-                $extractedMap[$normName] = [
-                    'name' => $extracted,
-                    'value' => null,
-                    'unit' => null,
-                    'range' => null,
-                ];
-            }
-
-            if ($normName !== '') {
-                $sKey = $this->findSenoclockKey($normName, $mapping);
-                if ($sKey) {
-                    $extractedSenoclockMap[$sKey] = $extractedMap[$normName];
+                if (!isset($extractedMap[$normName])) {
+                    $extractedMap[$normName] = [
+                        'name' => $extracted,
+                        'value' => null,
+                        'unit' => null,
+                        'range' => null,
+                    ];
                 }
             }
         }
@@ -1122,57 +1137,38 @@ class SenoclockAiService
                 continue;
             }
 
-            $biomarkerName = strtolower(trim($biomarker['name'] ?? ''));
-            $matchedKeys = [];
-            
-            // Check if the item itself matches a Senoclock marker directly
-            $matchedKey = $this->findSenoclockKey($biomarkerName, $mapping);
-            if ($matchedKey) {
-                $matchedKeys[] = $matchedKey;
-            }
-
-            // Check the nested matched_biomarkers list
+            // A 'biomarker' here actually represents a MajorOrganTest (e.g. 'Liver Function Test')
+            // with a list of 'matched_biomarkers' (e.g. ['ALT', 'AST', 'ALP']).
+            $testMatchedBiomarkers = [];
             if (!empty($biomarker['matched_biomarkers']) && is_array($biomarker['matched_biomarkers'])) {
-                foreach ($biomarker['matched_biomarkers'] as $match) {
-                    $matchName = is_array($match) ? ($match['name'] ?? '') : $match;
-                    if (!empty($matchName)) {
-                        $mKey = $this->findSenoclockKey(strtolower(trim($matchName)), $mapping);
-                        if ($mKey) {
-                            $matchedKeys[] = $mKey;
-                        }
+                $testMatchedBiomarkers = $biomarker['matched_biomarkers'];
+            } else {
+                // Fallback if the biomarker array is just a single item
+                $testMatchedBiomarkers = [$biomarker['name'] ?? ''];
+            }
+
+            foreach ($testMatchedBiomarkers as $match) {
+                $matchName = is_array($match) ? ($match['name'] ?? '') : (string) $match;
+                $matchName = trim($matchName);
+                if ($matchName === '') {
+                    continue;
+                }
+
+                $sKey = $this->findSenoclockKey($matchName, $mapping);
+                if (!$sKey) {
+                    continue;
+                }
+
+                if (empty($sKey) || isset($markers[$sKey])) {
+                    continue;
+                }
+
+                $matchNorm = strtolower($matchName);
+                if (isset($extractedMap[$matchNorm])) {
+                    $valObj = $this->extractValUnitRange($extractedMap[$matchNorm], $extractedMap);
+                    if ($valObj) {
+                        $markers[$sKey] = $valObj;
                     }
-                }
-            }
-
-            $matchedKeys = array_unique($matchedKeys);
-
-            if (empty($matchedKeys) && !empty($biomarkerName)) {
-                $sanitizedKey = strtoupper(preg_replace('/[^a-zA-Z0-9]+/', '_', trim($biomarkerName)));
-                $sanitizedKey = trim($sanitizedKey, '_');
-                if (!empty($sanitizedKey)) {
-                    $matchedKeys[] = $sanitizedKey;
-                }
-            }
-
-            foreach ($matchedKeys as $sKey) {
-                if (isset($markers[$sKey])) {
-                    continue; // Already processed this Senoclock marker
-                }
-
-                $valObj = null;
-
-                // Try to get value directly from extracted map by Senoclock key
-                if (isset($extractedSenoclockMap[$sKey])) {
-                    $valObj = $this->extractValUnitRange($extractedSenoclockMap[$sKey], $extractedMap);
-                } 
-                
-                // Fallback to original logic if needed
-                if (!$valObj) {
-                    $valObj = $this->extractValUnitRange($biomarker, $extractedMap);
-                }
-
-                if ($valObj) {
-                    $markers[$sKey] = $valObj;
                 }
             }
         }
@@ -1228,31 +1224,9 @@ class SenoclockAiService
 
     private function extractValUnitRange(array $biomarker, array $extractedMap): ?array
     {
-        $value = null;
-        $unit = null;
-        $range = null;
-
-        if (!empty($biomarker['matched_biomarkers']) && is_array($biomarker['matched_biomarkers'])) {
-            $first = $biomarker['matched_biomarkers'][0] ?? null;
-            if (is_array($first)) {
-                $value = $first['value'] ?? null;
-                $unit = $first['unit'] ?? null;
-                $range = $first['reference_range'] ?? $first['range'] ?? null;
-            } elseif (is_string($first)) {
-                $matchNorm = strtolower(trim($first));
-                if (isset($extractedMap[$matchNorm])) {
-                    $value = $extractedMap[$matchNorm]['value'] ?? null;
-                    $unit = $extractedMap[$matchNorm]['unit'] ?? null;
-                    $range = $extractedMap[$matchNorm]['range'] ?? $extractedMap[$matchNorm]['reference_range'] ?? null;
-                }
-            }
-        }
-
-        if ($value === null || $value === '') {
-            $value = $biomarker['value'] ?? null;
-            $unit = $biomarker['unit'] ?? null;
-            $range = $biomarker['range'] ?? $biomarker['reference_range'] ?? null;
-        }
+        $value = $biomarker['value'] ?? null;
+        $unit = $biomarker['unit'] ?? null;
+        $range = $biomarker['range'] ?? $biomarker['reference_range'] ?? null;
         
         if ($value === null || $value === '') {
             $nameNorm = strtolower(trim($biomarker['name'] ?? ''));
@@ -1263,24 +1237,84 @@ class SenoclockAiService
             }
         }
 
-        // Always return the structure if requested, or if value exists.
-        // But if the user really wants the available biomarkers sent, even if value is null?
-        // Let's at least return what we can.
         if ($value !== null && $value !== '') {
             if (is_numeric($value)) {
                 $value = str_contains((string)$value, '.') ? (float)$value : (int)$value;
             }
-            return [
+            
+            if ($unit) {
+                // Fix greek letters and superscripts before stripping non-ascii
+                $unit = str_replace(['μ', 'µ'], 'u', $unit);
+                $unit = str_replace(['³', 'Â³'], '^3', $unit);
+                $unit = str_replace(['²', 'Â²'], '^2', $unit);
+                $unit = str_replace('mmA3', 'mm^3', $unit);
+
+                $unit = preg_replace('/[^\x20-\x7E]/', '', $unit); // Strip non-ASCII
+
+                // Normalize spacing and common OCR errors for cell counts (PLT, RBC, WBC)
+                $unit = str_ireplace(['x10^', '*10^', 'x 10^', '10*'], '10^', $unit);
+                $unit = str_ireplace(['/ L', '/ l'], '/L', $unit);
+                $unit = str_ireplace(['/ uL', '/ ul', '/u l'], '/uL', $unit);
+                
+                // Senoclock strict unit conversions for identical cell counts
+                $unit = str_ireplace('10^3/uL', '10^9/L', $unit);
+                $unit = str_ireplace('10^6/uL', '10^12/L', $unit);
+                $unit = str_ireplace('10^3/mm^3', '10^9/L', $unit);
+                $unit = str_ireplace('10^6/mm^3', '10^12/L', $unit);
+            }
+
+            $result = [
                 'value' => $value,
-                'unit' => $unit ?: null,
-                'range' => $range ?: null,
+                'unit' => $unit ?: "",
             ];
+            
+            // Explicitly do not include empty strings for range to avoid Senoclock parsing crashes
+            if ($range !== null && trim($range) !== '') {
+                $result['range'] = trim($range);
+            }
+
+            return $result;
         }
 
-        // If we strictly require value for Senoclock, we could return null. 
-        // But let's return it with null if we at least matched it, so the user sees it?
-        // Wait, Senoclock API might crash if value is null.
         return null;
+    }
+
+    /**
+     * Validates and normalizes markers before sending to Senoclock File Execute
+     */
+    public function validateSenoClockMarkers(array $markers, array $availableKeys): array
+    {
+        $validMarkers = [];
+        $excluded = [];
+
+        foreach ($markers as $key => $data) {
+            if (!in_array($key, $availableKeys, true)) {
+                $excluded[] = "{$key} (not in available keys)";
+                continue;
+            }
+
+            if (!isset($data['value']) || $data['value'] === '') {
+                $excluded[] = "{$key} (missing value)";
+                continue;
+            }
+
+            $normalized = [
+                'value' => is_numeric($data['value']) ? (str_contains((string)$data['value'], '.') ? (float)$data['value'] : (int)$data['value']) : $data['value'],
+                'unit' => is_string($data['unit'] ?? null) ? trim($data['unit']) : '',
+            ];
+
+            if (isset($data['range']) && is_string($data['range']) && trim($data['range']) !== '') {
+                $normalized['range'] = trim($data['range']);
+            }
+
+            $validMarkers[$key] = $normalized;
+        }
+
+        if (!empty($excluded)) {
+            Log::info("SenoclockService: Excluded markers during final validation", ['excluded' => $excluded]);
+        }
+
+        return $validMarkers;
     }
 
     /**
@@ -1291,11 +1325,55 @@ class SenoclockAiService
         $baseUrl = rtrim((string) config('services.senoclock.base_url'), '/');
         $url = "{$baseUrl}/dl-api/file-execute/";
 
+        Log::info('SenoclockService: Request details', [
+            'url' => $url,
+            'application_now' => now()->toDateTimeString(),
+            'application_timezone' => config('app.timezone'),
+            'application_today' => now()->toDateString(),
+            'utc_now' => now()->utc()->toDateTimeString(),
+            'utc_today' => now()->utc()->toDateString(),
+            'test_date' => $payload['test_date'] ?? null,
+            'test_date_is_today' => isset($payload['test_date'])
+                ? $payload['test_date'] === now()->toDateString()
+                : null,
+            'test_date_is_future' => isset($payload['test_date'])
+                ? $payload['test_date'] > now()->toDateString()
+                : null,
+            'marker_count' => isset($payload['markers'])
+                ? count($payload['markers'])
+                : 0,
+            'marker_names' => isset($payload['markers'])
+                ? array_keys($payload['markers'])
+                : [],
+        ]);
+
         $response = Http::withoutVerifying()->withToken($token)
             ->post($url, $payload);
 
+        Log::info('SenoclockService: Response details', [
+            'http_status' => $response->status(),
+            'successful' => $response->successful(),
+            'failed' => $response->failed(),
+            'response_body' => $response->body(),
+            'response_json' => $response->json(),
+        ]);
+
         if (!$response->successful()) {
-            Log::error("Senoclock AI execute failed: " . $response->body(), ['payload' => $payload]);
+            if ($response->status() === 400) {
+                Log::error('SenoclockService: API validation failure', [
+                    'http_status' => $response->status(),
+                    'test_date_sent' => $payload['test_date'] ?? null,
+                    'application_today' => now()->toDateString(),
+                    'utc_today' => now()->utc()->toDateString(),
+                    'response_body' => $response->body(),
+                    'response_json' => $response->json(),
+                    'marker_count' => isset($payload['markers'])
+                        ? count($payload['markers'])
+                        : 0,
+                ]);
+            } else {
+                Log::error("Senoclock AI execute failed: " . $response->body(), ['payload' => $payload]);
+            }
             return null;
         }
 
@@ -1310,7 +1388,7 @@ class SenoclockAiService
         $baseUrl = rtrim((string) config('services.senoclock.base_url'), '/');
         $url = "{$baseUrl}/dl-api/report/download/?pdf_report=true&id=" . $reportId;
 
-        $maxAttempts = 12;
+        $maxAttempts = 30;
         $attempt = 0;
 
         while ($attempt < $maxAttempts) {
@@ -1324,7 +1402,7 @@ class SenoclockAiService
                     $contentType = $response->header('Content-Type');
                     if (strpos((string)$contentType, 'application/pdf') !== false) {
                         $fileName = "senoclock_{$reportId}.pdf";
-                        $uploadDir = public_path('uploads/senoclock');
+                        $uploadDir = public_path('uploads/senoclock_report_generated');
                         if (!file_exists($uploadDir)) {
                             @mkdir($uploadDir, 0777, true);
                         }
@@ -1333,7 +1411,7 @@ class SenoclockAiService
                         file_put_contents($filePath, $response->body());
 
                         Log::info("Senoclock AI PDF report downloaded successfully after {$attempt} attempts.");
-                        return 'uploads/senoclock/' . $fileName;
+                        return 'uploads/senoclock_report_generated/' . $fileName;
                     }
                 }
                 
