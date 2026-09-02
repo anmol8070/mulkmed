@@ -262,7 +262,7 @@ PROMPT;
         return $result;
     }
 
-    private function openAiHttpClient(string $apiKey)
+    public function openAiHttpClient(string $apiKey)
     {
         $caPath = base_path('cacert.pem');
 
@@ -452,7 +452,7 @@ PROMPT;
         return $biomarkers;
     }
 
-    private function extractResponsesOutputText(array $responseData): string
+    public function extractResponsesOutputText(array $responseData): string
     {
         if (
             isset($responseData['output_text']) &&

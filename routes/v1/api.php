@@ -484,6 +484,7 @@ use App\Http\Controllers\v1\PatientEmrReportController;
     Route::prefix('newshenai-care')->group(function () {
         Route::post('login', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'login']);
         Route::post('scan', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'scan']);
+        Route::post('uploadAiVitalReport', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'uploadAiVitalReport']);
         Route::post('trigger-classification', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'triggerClassification']);
         Route::get('latestLongevityReport', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'getLatestLongevityReport']);
         Route::get('vitals/{id?}', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'getVital']);
