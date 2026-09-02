@@ -386,6 +386,171 @@ $triggerId = 1;
     }
 
     /**
+     * Upload an AI Vital report PDF file, extract data using OpenAI, and save to ai_vitals table.
+     */
+    public function uploadAiVitalReport(Request $request, \App\Services\LabReportBiomarkerAnalyzerService $analyzerService): JsonResponse
+    {
+        $request->validate([
+            'user_id' => 'required|integer',
+            'report_file' => 'required|file|mimes:pdf',
+        ]);
+
+        try {
+            $file = $request->file('report_file');
+            
+            Log::info('Starting AI Vital PDF extraction', [
+                'user_id' => $request->user_id,
+                'filename' => $file->getClientOriginalName()
+            ]);
+
+            // 1. Upload to OpenAI Files API using the existing service
+            Log::info('Uploading AI Vital PDF to OpenAI');
+            $uploadedPdf = $analyzerService->uploadPdfToOpenAI($file);
+            
+            Log::info('AI Vital PDF uploaded successfully', [
+                'filename' => $uploadedPdf['original_name'],
+                'file_id' => $uploadedPdf['file_id']
+            ]);
+
+            // 2. Analyze PDF via OpenAI Responses API
+            $apiKey = config('services.openai.api_key');
+            if (empty($apiKey)) {
+                throw new \RuntimeException('OpenAI API key is missing.');
+            }
+
+            Log::info('Starting AI Vital OpenAI analysis');
+
+            $prompt = "You are extracting structured data from an AI Vital health report PDF.
+Read the ENTIRE uploaded PDF, including every page.
+Extract ALL health metrics, vital signs, physical parameters, indices, risk factors, and scores found in the PDF.
+Do not calculate, estimate, infer, guess, or hallucinate any value. Preserve the exact numeric or text values from the PDF.
+
+Return valid JSON only.
+Structure the JSON as a comprehensive flat object where keys are the metric names (in camelCase).
+For the value of each metric, return an object containing the following exact keys:
+- \"name\": The original field or biomarker name as it appears in the PDF
+- \"result\": The exact result value as a string (preserve all formatting, commas, decimals, e.g. \"1,259.00\", \"111 / 74\", \"46.54\")
+- \"unit\": The exact unit as a string (e.g. \"bpm\", \"mmHg\", \"%\", \"-\"). Leave empty if no unit.
+- \"normal_range\": The exact normal range as a string (e.g. \"60 - 100\", \"N/A*\", \"SBP 90 - 120, DBP 60 - 70\"). Leave empty if no range.
+
+CRITICAL INSTRUCTION: You MUST include the following specific keys if their corresponding data is found anywhere in the report:
+- \"wellnessScore\"
+- \"hrvSdnnMs\" (Heart Rate Variability)
+- \"bmi\"
+- \"basalMetabolicRate\"
+- \"totalDailyEnergyExpenditure\"
+
+For all other metrics found (e.g., Blood Pressure, Stress Index, Vascular Age, Heart Rate, etc.), invent an appropriate camelCase key and add it to the JSON.
+
+Rules:
+- If a parameter is not present, do not invent it.
+- Do not return markdown (e.g., no ```json).
+- Do not return explanations outside the JSON.";
+
+            $payload = [
+                'model' => config('services.openai.model', 'gpt-4o'),
+                'input' => [
+                    [
+                        'role' => 'user',
+                        'content' => [
+                            [
+                                'type' => 'input_text',
+                                'text' => $prompt,
+                            ],
+                            [
+                                'type' => 'input_file',
+                                'file_id' => $uploadedPdf['file_id'],
+                            ]
+                        ],
+                    ],
+                ],
+            ];
+
+            $response = $analyzerService->openAiHttpClient($apiKey)
+                ->post('https://api.openai.com/v1/responses', $payload);
+
+            $responseData = $response->json();
+            
+            Log::info('OpenAI Responses API completed', [
+                'response_id' => $responseData['id'] ?? null,
+                'status' => $responseData['status'] ?? null,
+            ]);
+
+            if (!$response->successful()) {
+                throw new \RuntimeException('OpenAI Responses API failed with status ' . $response->status());
+            }
+
+            $outputText = $analyzerService->extractResponsesOutputText($responseData);
+            Log::info('AI Vital OpenAI output extracted');
+            
+            if (empty($outputText)) {
+                throw new \RuntimeException('OpenAI returned an empty analysis response.');
+            }
+
+            $outputText = trim($outputText);
+            $outputText = preg_replace('/^```json\s*/i', '', $outputText);
+            $outputText = preg_replace('/\s*```$/', '', $outputText);
+            
+            $extractedData = json_decode($outputText, true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw new \RuntimeException('OpenAI returned invalid JSON');
+            }
+
+            Log::info('AI Vital JSON parsed successfully');
+
+            // Save file locally as well
+            $destinationPath = public_path('uploads/ai_vital_senoclock');
+            if (!file_exists($destinationPath)) {
+                mkdir($destinationPath, 0777, true);
+            }
+            $fileName = time() . '_' . $file->getClientOriginalName();
+            $file->move($destinationPath, $fileName);
+
+            $aiVital = new AI_Vital();
+            $aiVital->user_id = $request->input('user_id');
+            $aiVital->is_longevity = 1;
+            $aiVital->scan_date = now();
+            $aiVital->shen_ai = $extractedData;
+            $aiVital->report = json_encode($extractedData); // Encode because report is not cast to array
+            $aiVital->pdf_file = 'uploads/ai_vital_senoclock/' . $fileName;
+            $aiVital->save();
+
+            // Trigger Senoclock AI classification to generate clinical triggers
+            try {
+                $user = Users::find($aiVital->user_id);
+                $this->senoclockAiService->processAiVital($aiVital, $user, $request);
+                $aiVital->refresh();
+            } catch (\Throwable $e) {
+                Log::error('uploadAiVitalReport Senoclock AI classification trigger error: ' . $e->getMessage());
+            }
+
+            $baseUrl = url('/');
+            $pdfUrl = $baseUrl . '/api/v1/newshenai-care/longevityReportPdf?user_id=' . $aiVital->user_id . '&report_id=' . $aiVital->id;
+
+            Log::info('AI Vital PDF extraction completed successfully', [
+                'extracted_metrics_count' => count($extractedData),
+                'keys' => array_keys($extractedData),
+            ]);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'AI Vital report uploaded and processed successfully.',
+                'data' => [
+                    'ai_vital_id' => $aiVital->id,
+                    'file_path' => 'uploads/ai_vital_senoclock/' . $fileName
+                ]
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error("v1\\NewShenaiCareController: uploadAiVitalReport error: " . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => 'An error occurred while uploading the report: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Trigger classification for an existing AI Vital record.
      */
     public function triggerClassification(Request $request): JsonResponse
@@ -686,9 +851,52 @@ $triggerId = 1;
         $user = Users::where('id', $request->user_id)->first();
         $data['user'] = $user;
         $data['scan_date'] = $ai_vital_report->scan_date ?? null;
-        $data['report'] = !empty($ai_vital_report->report) ? (is_string($ai_vital_report->report) ? json_decode($ai_vital_report->report) : $ai_vital_report->report) : '';
-        $data['senoclock_ai_response'] = !empty($ai_vital_report->senoclock_ai_response) ? (is_string($ai_vital_report->senoclock_ai_response) ? json_decode($ai_vital_report->senoclock_ai_response) : $ai_vital_report->senoclock_ai_response) : '';
-        $data['shen_ai'] = !empty($ai_vital_report->shen_ai) ? (is_string($ai_vital_report->shen_ai) ? json_decode($ai_vital_report->shen_ai) : $ai_vital_report->shen_ai) : '';
+        $reportData = !empty($ai_vital_report->report) ? (is_string($ai_vital_report->report) ? json_decode($ai_vital_report->report) : json_decode(json_encode($ai_vital_report->report))) : new \stdClass();
+        $shenAiData = !empty($ai_vital_report->shen_ai) ? (is_string($ai_vital_report->shen_ai) ? json_decode($ai_vital_report->shen_ai) : json_decode(json_encode($ai_vital_report->shen_ai))) : new \stdClass();
+        
+        $data['senoclock_ai_response'] = !empty($ai_vital_report->senoclock_ai_response) ? (is_string($ai_vital_report->senoclock_ai_response) ? json_decode($ai_vital_report->senoclock_ai_response) : json_decode(json_encode($ai_vital_report->senoclock_ai_response))) : '';
+        
+        // Normalize report data for the Blade view
+        $mapFields = function($source) {
+            if (!$source) return new \stdClass();
+            $mapped = clone $source;
+            
+            // Map root-level aliases
+            $mapped->heartRate = $source->pulse ?? $source->heartRate ?? null;
+            $mapped->respiratoryRate = $source->breathingRate ?? $source->respiratoryRate ?? null;
+            $mapped->stressLevel = $source->stressIndex ?? $source->stressLevel ?? null;
+            
+            // Create healthIndices object if it doesn't exist
+            if (!isset($mapped->healthIndices) || !is_object($mapped->healthIndices)) {
+                $mapped->healthIndices = new \stdClass();
+            }
+            
+            // Map flat metrics to nested healthIndices
+            $mapped->healthIndices->wellnessScore = $source->wellnessScore ?? $mapped->healthIndices->wellnessScore ?? null;
+            $mapped->healthIndices->vascularAge = $source->vascularAge ?? $mapped->healthIndices->vascularAge ?? null;
+            $mapped->healthIndices->totalCVMortalityRisk = $source->cardiovascularRiskScore ?? $mapped->healthIndices->totalCVMortalityRisk ?? null;
+            $mapped->healthIndices->hypertensionRisk = $source->hypertensionRisk ?? $mapped->healthIndices->hypertensionRisk ?? null;
+            $mapped->healthIndices->diabetesRisk = $source->diabetesRisk ?? $mapped->healthIndices->diabetesRisk ?? null;
+            $mapped->healthIndices->nonAlcoholicFattyLiverDiseaseRisk = $source->fattyLiverDiseaseRisk ?? $mapped->healthIndices->nonAlcoholicFattyLiverDiseaseRisk ?? null;
+            
+            $mapped->healthIndices->waistToHeightRatio = $source->waistToHeightRatio ?? $mapped->healthIndices->waistToHeightRatio ?? null;
+            $mapped->healthIndices->bodyFatPercentage = $source->bodyFatPercentage ?? $mapped->healthIndices->bodyFatPercentage ?? null;
+            $mapped->healthIndices->basalMetabolicRate = $source->basalMetabolicRate ?? $mapped->healthIndices->basalMetabolicRate ?? null;
+            $mapped->healthIndices->totalDailyEnergyExpenditure = $source->totalDailyEnergyExpenditure ?? $mapped->healthIndices->totalDailyEnergyExpenditure ?? null;
+            
+            // Nested cvDiseases
+            if (!isset($mapped->healthIndices->cvDiseases)) $mapped->healthIndices->cvDiseases = new \stdClass();
+            $mapped->healthIndices->cvDiseases->overallRisk = $source->cardiovascularDiseaseRisk ?? $mapped->healthIndices->cvDiseases->overallRisk ?? null;
+            
+            // Nested hardAndFatalEvents
+            if (!isset($mapped->healthIndices->hardAndFatalEvents)) $mapped->healthIndices->hardAndFatalEvents = new \stdClass();
+            $mapped->healthIndices->hardAndFatalEvents->hardCVEventRisk = $source->hardAndFatalEventsRisks ?? $mapped->healthIndices->hardAndFatalEvents->hardCVEventRisk ?? null;
+            
+            return $mapped;
+        };
+
+        $data['report'] = $mapFields($reportData);
+        $data['shen_ai'] = $mapFields($shenAiData);
 
         $viewName = $ai_vital_report->is_longevity == 1 ? 'pages.aivital_LongevityReport' : 'pages.vitalScanReport';
         if (!view()->exists($viewName)) {
@@ -797,10 +1005,10 @@ $triggerId = 1;
                     'image' => !empty($up->plan->image) ? GlobalFunction::createMediaUrl($up->plan->image) : null,
                     'whats_included' => is_string($up->plan->whats_included) ? json_decode($up->plan->whats_included, true) : $up->plan->whats_included,
                     'benefits' => is_string($up->plan->benefits) ? json_decode($up->plan->benefits, true) : $up->plan->benefits,
-                    'status' => $up->status,
-                    'expiry_date' => $up->expiry_date,
-                    'purchased_at' => $up->created_at->format('Y-m-d H:i:s'),
-                ];
+                'status' => $up->status,
+                'expiry_date' => $up->expiry_date,
+                'purchased_at' => $up->created_at->format('Y-m-d H:i:s'),
+            ];
             }
         }
 
@@ -811,4 +1019,4 @@ $triggerId = 1;
             'plans' => $data,
         ]);
     }
-}
+    }

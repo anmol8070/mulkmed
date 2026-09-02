@@ -11,16 +11,23 @@ class JitsiMeetingLinkDoctor extends Mailable
     use Queueable, SerializesModels;
 
     public $jitsiLink;
+    public $appointmentDate;
+    public $appointmentTime;
+    public $appointment;
+    public $doctor;
+    public $patient;
+    public $meetingLink;
+    public $patientName;
 
-    public function __construct($appointment, $doctor, $patient, $meetingLink)
+    public function __construct($appointment, $doctor, $patient, $meetingLink, $appointmentDate = null, $appointmentTime = null)
     {
         $this->patientName = $patient->fullname;
-        $this->appointmentDate = Carbon::parse($appointment->date)->format('d-m-Y');
+        $this->appointmentDate = $appointmentDate ?: Carbon::parse($appointment->date)->format('d-m-Y');
         $this->appointment = $appointment;
         $this->doctor = $doctor;
         $this->patient = $patient;
         $this->meetingLink = $meetingLink;
-        $this->appointmentTime = Carbon::createFromFormat('Hi', $appointment->time)->format('g:i A');
+        $this->appointmentTime = $appointmentTime ?: Carbon::createFromFormat('Hi', $appointment->time)->format('g:i A');
     }
 
     public function build()

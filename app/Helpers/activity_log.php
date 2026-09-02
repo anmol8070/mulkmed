@@ -94,3 +94,78 @@ if (!function_exists('normalize_activity_log_data')) {
         return ['value' => $data];
     }
 }
+
+if (!function_exists('getMetricValue')) {
+    function getMetricValue($metric, $fallback = 0) {
+        $extractNumber = function($val) use ($fallback) {
+            if (is_null($val) || $val === '') return $fallback;
+            if (is_numeric($val)) return (float) $val;
+            
+            // Remove everything except numbers, dot, comma, and minus sign
+            $cleaned = preg_replace('/[^0-9.,-]/', '', (string)$val);
+            if ($cleaned === '') return $fallback;
+            
+            // If there's a comma used as thousand separator, remove it for parsing
+            // Check if comma is followed by exactly 3 digits
+            if (preg_match('/,\d{3}/', $cleaned)) {
+                $cleaned = str_replace(',', '', $cleaned);
+            } else {
+                // If comma is used as decimal separator, replace with dot
+                $cleaned = str_replace(',', '.', $cleaned);
+            }
+            
+            return (float) $cleaned;
+        };
+
+        if (is_object($metric) && isset($metric->result)) {
+            return $extractNumber($metric->result);
+        } elseif (is_array($metric) && isset($metric['result'])) {
+            return $extractNumber($metric['result']);
+        }
+        return $extractNumber($metric);
+    }
+
+    function getMetricDisplay($metric, $fallbackFormat = null) {
+        $extractDisplay = function($val) use ($fallbackFormat) {
+            if (is_null($val) || $val === '') return '-';
+            
+            if ($fallbackFormat === 'round') {
+                $num = getMetricValue($val);
+                return round($num);
+            } elseif ($fallbackFormat === 'format2') {
+                $num = getMetricValue($val);
+                return number_format($num, 2);
+            }
+            // For strings with units like "84 bpm", strip the text and keep just the formatted number
+            if (is_string($val) && preg_match('/^([0-9.,]+)\s*[a-zA-Z%]+/', trim($val), $matches)) {
+                return $matches[1];
+            }
+            return $val;
+        };
+
+        if (is_object($metric) && isset($metric->result)) {
+            return $extractDisplay($metric->result);
+        } elseif (is_array($metric) && isset($metric['result'])) {
+            return $extractDisplay($metric['result']);
+        }
+        return $extractDisplay($metric);
+    }
+
+    function getMetricUnit($metric, $fallbackUnit) {
+        if (is_object($metric) && isset($metric->unit)) {
+            return $metric->unit ?: $fallbackUnit;
+        } elseif (is_array($metric) && isset($metric['unit'])) {
+            return $metric['unit'] ?: $fallbackUnit;
+        }
+        return $fallbackUnit;
+    }
+
+    function getMetricRange($metric, $fallbackRange) {
+        if (is_object($metric) && isset($metric->normal_range)) {
+            return $metric->normal_range ?: $fallbackRange;
+        } elseif (is_array($metric) && isset($metric['normal_range'])) {
+            return $metric['normal_range'] ?: $fallbackRange;
+        }
+        return $fallbackRange;
+    }
+}

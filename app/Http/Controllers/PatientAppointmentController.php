@@ -33,8 +33,9 @@ class PatientAppointmentController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'fullname' => 'required|string|max:255',
-            'gender' => ['required', Rule::in(Constants::genderMale, Constants::genderFemale)],
+            'gender' => 'required|in:male,female,other',
             'dob' => 'required|date',
+            // 'email' => 'required|email|unique:users,identity',
             'email' => 'nullable|email|unique:users,identity',
             'username' => 'required|string|unique:users,username',
             'password' => 'required',
@@ -57,16 +58,21 @@ class PatientAppointmentController extends Controller
         // If validation fails, auto-redirect with errors
         $validator->validate();
 
+        $genderMap = [
+            'male' => 1,
+            'female' => 2,
+            'other' => 3,
+        ];
+
         $user = new Users();
         $user->fullname = $request->fullname;
-        $user->gender = (int) $request->gender;
+        $user->gender = $genderMap[$request->gender];
         $user->dob = $request->dob;
         $user->email = $request->email;
         $user->identity = $request->email;
         $user->username = $request->username;
         $user->password = ($request->password);
         $user->ref_id = $request->id_number;
-        $user->country_code = $request->country_code;
         $user->phone_number = $request->phone_number;
         $user->type = $request->type ?? null;
         $user->save();
@@ -257,16 +263,16 @@ class PatientAppointmentController extends Controller
 
         if ($request->hasFile('document')) {
 
-            $document = $request->file('document');
+    $document = $request->file('document');
 
-            $docs = new AppointmentDocs();
-            $docs->appointment_id = $appointment->id;
-            $docs->image = GlobalFunction::saveFileAndGivePath($document);
-            $docs->is_from_admin = 1;
-            $docs->save();
-            
+    $docs = new AppointmentDocs();
+    $docs->appointment_id = $appointment->id;
+    $docs->image = GlobalFunction::saveFileAndGivePath($document);
+    $docs->is_from_admin = 1;
+    $docs->save();
+
     $attachments = [];
-            $attachments[] = GlobalFunction::createMediaUrl($docs->image);
+    $attachments[] = GlobalFunction::createMediaUrl($docs->image);
 
     \Log::info('Attachments:', $attachments);
 
@@ -290,7 +296,7 @@ class PatientAppointmentController extends Controller
         \Log::error('Appointment document email failed: ' . $e->getMessage());
 
     }
-        }
+}
 
         $appId  = env('JITSI_APP_ID');
         $secret = env('JITSI_SECRET');
@@ -378,8 +384,18 @@ class PatientAppointmentController extends Controller
             'admin_platform_time' => $adminPlatformTime,
         ]);
 
-        \Mail::to($user->email)->send(new \App\Mail\JitsiMeetingLinkPatient($appointment, $doctor, $user, $patient_link_mail));
+        \Mail::to($user->email)->send(new \App\Mail\JitsiMeetingLinkPatient($appointment, $doctor, $user, $patient_link_mail, $userAppointmentDate, $userAppointmentTime));
 
+        $patientEmailPreview = "Appointment: {$userAppointmentDate} at {$userAppointmentTime}. Join here: {$patient_link_mail}";
+        Log::info('BOOKING_TRACE patient flow patient email triggered', [
+            'appointment_id' => $appointment->id,
+            'receiver' => $user->email,
+            'user_country_code' => $user->country_code,
+            'user_timezone' => $userTimezone,
+            'patient_email_date' => $userAppointmentDate,
+            'patient_email_time' => $userAppointmentTime,
+            'message_preview' => $patientEmailPreview,
+        ]);
         $cleanCode = ltrim($user->country_code, '+');
         // Build SMS message (plain text)
 //         $message = "Dear {$user->fullname},
@@ -395,7 +411,7 @@ class PatientAppointmentController extends Controller
 // Regards,
 // Team Mulk Med";     
 
-$message = "Appointment: {$userAppointmentDate} at {$userAppointmentTime}. Join:here {$patient_link_mail}";
+$message = "Appointment: {$userAppointmentDate} at {$userAppointmentTime}. Join here: {$patient_link_mail}";
                 $result = EmailHelpers::sendSms($cleanCode . $user->phone_number, $message);
                 Log::info('BOOKING_TRACE patient flow patient sms triggered', [
                     'appointment_id' => $appointment->id,
@@ -469,23 +485,35 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                 ]);
                 
                 
-                \Mail::to($doctor->identity)->send(new \App\Mail\JitsiMeetingLinkDoctor($appointment, $doctor, $user, $doctor_link_mail));
+                \Mail::to($doctor->identity)->send(new \App\Mail\JitsiMeetingLinkDoctor($appointment, $doctor, $user, $doctor_link_mail, $doctorAppointmentDate, $doctorAppointmentTime));
+
+                $doctorEmailPreview = "Dear Dr. {$doctor->name},\nA new appointment has been scheduled with the following patient:\nAppointment Details:\nPatient Name: {$user->fullname}.\nPatient Phone-number: {$user->phone_number}.\nPatient Email Id: {$user->email}.\nDate & Time: {$doctorAppointmentDate}, {$doctorAppointmentTime}.\nLink: {$doctor_link_mail}\nAdditional Information:\nWe have asked patient to complete their AI Vitals and upload supporting documents if any.\nThank you for your continued care,\nMulkMed Healthcare";
+                Log::info('BOOKING_TRACE patient flow doctor email triggered', [
+                    'appointment_id' => $appointment->id,
+                    'receiver' => $doctor->identity,
+                    'admin_host' => $adminHost,
+                    'doctor_country_code' => $doctor->country_code,
+                    'doctor_timezone' => $doctorTimezone,
+                    'doctor_email_date' => $doctorAppointmentDate,
+                    'doctor_email_time' => $doctorAppointmentTime,
+                    'message_preview' => $doctorEmailPreview,
+                ]);
                 // return $doctor;
                 if($doctor->email_2 != null)
                 {
-                    \Mail::to($doctor->email_2)->send(new \App\Mail\JitsiMeetingLinkDoctor($appointment, $doctor, $user, $doctor_link_mail));
+                    \Mail::to($doctor->email_2)->send(new \App\Mail\JitsiMeetingLinkDoctor($appointment, $doctor, $user, $doctor_link_mail, $doctorAppointmentDate, $doctorAppointmentTime));
                 }
                 if($doctor->email_3 != null)
                 {
-                    \Mail::to($doctor->email_3)->send(new \App\Mail\JitsiMeetingLinkDoctor($appointment, $doctor, $user, $doctor_link_mail));
+                    \Mail::to($doctor->email_3)->send(new \App\Mail\JitsiMeetingLinkDoctor($appointment, $doctor, $user, $doctor_link_mail, $doctorAppointmentDate, $doctorAppointmentTime));
                 }
                 if($doctor->email_4 != null)
                 {
-                    \Mail::to($doctor->email_4)->send(new \App\Mail\JitsiMeetingLinkDoctor($appointment, $doctor, $user, $doctor_link_mail));
+                    \Mail::to($doctor->email_4)->send(new \App\Mail\JitsiMeetingLinkDoctor($appointment, $doctor, $user, $doctor_link_mail, $doctorAppointmentDate, $doctorAppointmentTime));
                 }
                 if($doctor->email_5 != null)
                 {
-                    \Mail::to($doctor->email_5)->send(new \App\Mail\JitsiMeetingLinkDoctor($appointment, $doctor, $user, $doctor_link_mail));
+                    \Mail::to($doctor->email_5)->send(new \App\Mail\JitsiMeetingLinkDoctor($appointment, $doctor, $user, $doctor_link_mail, $doctorAppointmentDate, $doctorAppointmentTime));
                 }
 
         // Send Push to user
@@ -557,23 +585,13 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
         } else {
             $search = $request->input('search.value');
             $result =  HnHCards::where('is_deleted', 0)
-                ->where(function ($query) use ($search) {
-                    $query->where('user_name', 'LIKE', "%{$search}%")
-                          ->orWhere('card_number', 'LIKE', "%{$search}%")
-                          ->orWhere('email', 'LIKE', "%{$search}%")
-                          ->orWhere('phone_number', 'LIKE', "%{$search}%");
-                })
+                ->Where('name', 'LIKE', "%{$search}%")
                 ->offset($start)
                 ->limit($limit)
                 ->orderBy($order, $dir)
                 ->get();
             $totalFiltered = HnHCards::where('is_deleted', 0)
-                ->where(function ($query) use ($search) {
-                    $query->where('user_name', 'LIKE', "%{$search}%")
-                          ->orWhere('card_number', 'LIKE', "%{$search}%")
-                          ->orWhere('email', 'LIKE', "%{$search}%")
-                          ->orWhere('phone_number', 'LIKE', "%{$search}%");
-                })
+                ->Where('name', 'LIKE', "%{$search}%")
                 ->count();
         }
         // $currency_symbol = Settings::first();
