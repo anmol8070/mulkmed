@@ -43,6 +43,8 @@ use App\Models\DoctorsBySymptoms;
 use App\Models\JitsiMeeting;
 use App\Models\AI_Vital;
 use App\Models\AIVitalScanMisa;
+use App\Models\UserLongevityPlan;
+use App\Models\MajorOrganUserSelection;
 use App\Models\UserCoupons;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Http;
@@ -2473,6 +2475,26 @@ Team Mulk Med.";
 
         $sectionSequence = [];
 
+        $hasBoughtLongevityPlan = false;
+        $userId = $request->user_id ?? $request->query('user_id');
+        if (!empty($userId)) {
+            $hasUserPlan = UserLongevityPlan::where('user_id', $userId)
+                ->whereNotIn('status', ['expired', 0, '0', 'cancelled', 'failed'])
+                ->where(function($q) {
+                    $q->whereNull('expiry_date')
+                      ->orWhere('expiry_date', '>=', Carbon::today()->toDateString());
+                })
+                ->exists();
+
+            $hasMajorOrganSelection = MajorOrganUserSelection::where('user_id', $userId)
+                ->where('selection_type', 'longevity')
+                ->exists();
+
+            if ($hasUserPlan || $hasMajorOrganSelection) {
+                $hasBoughtLongevityPlan = true;
+            }
+        }
+
         $hostAndConversionRate = Helpers::conversionRate();
         $conversionRate = (float) $hostAndConversionRate['conversionRate'];
         if($request->has('search'))
@@ -2913,6 +2935,20 @@ Team Mulk Med.";
                 }
             }
 
+            if($sequence->section_type == 'mulk_longevity_lab_report')
+            {
+                if ($hasBoughtLongevityPlan) {
+                    $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
+                                    ->where('is_deleted', 0)
+                                    ->get();
+                    if($labReportSection->isNotEmpty())
+                    {
+                        $sequence->section_data = $labReportSection;
+                        array_push($sectionSequence, $sequence);
+                    }
+                }
+            }
+
             if($sequence->section_type == 'Mulk_Longevity_Care' || $sequence->section_type == 'mulk_longevity_care')
             {
                 $section = DashboardBanners::where('name', 'Mulk Longevity Care')
@@ -2930,17 +2966,20 @@ Team Mulk Med.";
                 }
 
                 // Separate section for Mulk Longevity Lab Report
-                $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
-                                ->where('is_deleted', 0)
-                                ->get();
-                if($labReportSection->isNotEmpty())
+                if ($hasBoughtLongevityPlan && !$sections->contains('section_type', 'mulk_longevity_lab_report'))
                 {
-                    $labSequence = clone $sequence;
-                    $labSequence->id = $sequence->id + 1000; // Give it a unique pseudo ID
-                    $labSequence->section_name = 'Mulk Longevity Lab Report';
-                    $labSequence->section_type = 'mulk_longevity_lab_report';
-                    $labSequence->section_data = $labReportSection;
-                    array_push($sectionSequence, $labSequence);
+                    $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
+                                    ->where('is_deleted', 0)
+                                    ->get();
+                    if($labReportSection->isNotEmpty())
+                    {
+                        $labSequence = clone $sequence;
+                        $labSequence->id = $sequence->id + 1000; // Give it a unique pseudo ID
+                        $labSequence->section_name = 'Mulk Longevity Lab Report';
+                        $labSequence->section_type = 'mulk_longevity_lab_report';
+                        $labSequence->section_data = $labReportSection;
+                        array_push($sectionSequence, $labSequence);
+                    }
                 }
             }
 

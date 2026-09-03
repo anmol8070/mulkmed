@@ -645,27 +645,13 @@ class MajorOrganTestController extends Controller
                 $payload
             );
         } else {
-            $existingIndividualSelections = \App\Models\MajorOrganUserSelection::where('user_id', (int) $request->user_id)
-                ->where('status', 1)
-                ->where('selection_type', 'individual')
-                ->get();
-            
-            $existingTestIds = [];
-            foreach ($existingIndividualSelections as $sel) {
-                $testArr = $sel->selected_organ_tests ?? [];
-                if (!empty($testArr) && isset($testArr[0]['id'])) {
-                    $existingTestIds[] = $testArr[0]['id'];
-                }
-            }
-
-            foreach ($organTestIds as $testId) {
-                if (!in_array($testId, $existingTestIds)) {
-                    $test = MajorOrganTest::where('status', 1)->where('id', $testId)->get();
-                    if ($test->isNotEmpty()) {
-                        $payload = $this->buildSelectionPayload($request->user_id, 'individual', null, $test, $request->plan_id);
-                        \App\Models\MajorOrganUserSelection::create($payload);
-                    }
-                }
+            $tests = MajorOrganTest::where('status', 1)->whereIn('id', $organTestIds)->get();
+            if ($tests->isNotEmpty()) {
+                $payload = $this->buildSelectionPayload($request->user_id, 'individual', null, $tests, $request->plan_id);
+                \App\Models\MajorOrganUserSelection::updateOrCreate(
+                    ['user_id' => (int) $request->user_id, 'status' => 1, 'selection_type' => 'individual'],
+                    $payload
+                );
             }
         }
 
@@ -675,15 +661,13 @@ class MajorOrganTestController extends Controller
             ->orderBy('id', 'desc')
             ->get();
 
-        $data = $allSelections->map(function ($sel) {
-            return $this->formatSelection($sel);
-        });
+        $result = $this->formatGroupedSelections($allSelections, CurrencyHelper::getUserCurrency());
 
         return response()->json([
             'status' => true,
             'message' => 'Selection saved successfully',
             'currency' => CurrencyHelper::getUserCurrency(),
-            'data' => $data,
+            'data' => $result['data'],
         ]);
     }
 
@@ -772,15 +756,18 @@ class MajorOrganTestController extends Controller
             }
         }
 
-        // If no selection_type is provided, fetch user's cart (status=1) or purchased (status=2) selections
-        $statuses = $request->filled('status') ? explode(',', $request->status) : [1, 2];
-        $query = MajorOrganUserSelection::where('user_id', (int) $request->user_id)
-            ->whereIn('status', $statuses);
-            
-        // If no selection_type is provided, fetch user's cart selections
+        // Fetch user's successful paid selections by default, or filter by requested status/payment_status
+        $query = MajorOrganUserSelection::where('user_id', (int) $request->user_id);
 
-        // $query = MajorOrganUserSelection::where('user_id', (int) $request->user_id)
-        //     ->where('status', 2);
+        if ($request->filled('payment_status')) {
+            $query->where('payment_status', $request->payment_status);
+        } else if ($request->filled('status')) {
+            $statuses = explode(',', $request->status);
+            $query->whereIn('status', $statuses);
+        } else {
+            // Default: display only successful paid plan selections
+            $query->where('payment_status', 1);
+        }
 
         $selections = $query->orderBy('created_at', 'desc')->get();
 
@@ -794,19 +781,120 @@ class MajorOrganTestController extends Controller
             ]);
         }
 
-        $totalAmountSum = 0;
-        $data = $selections->map(function ($sel) use (&$totalAmountSum) {
-            $totalAmountSum += (float) $sel->total_amount;
-            return $this->formatSelection($sel);
-        });
+        $result = $this->formatGroupedSelections($selections, $currency);
 
         return response()->json([
             'status' => true,
             'message' => 'Selections fetched successfully',
             'currency' => $currency,
-            'total_amount' => number_format((float) CurrencyHelper::convert($totalAmountSum, $currency), 2, '.', ''),
-            'data' => $data,
+            'total_amount' => number_format((float) CurrencyHelper::convert($result['total_amount'], $currency), 2, '.', ''),
+            'data' => $result['data'],
         ]);
+    }
+
+    protected function formatGroupedSelections($selections, string $currency): array
+    {
+        $grouped = $selections->groupBy(function ($item) {
+            if (!empty($item->order_id)) {
+                return 'order_' . $item->order_id;
+            }
+            $timeKey = $item->created_at ? $item->created_at->format('Y-m-d H:i:s') : 'no_time';
+            return 'group_' . $timeKey . '_' . $item->selection_type;
+        });
+
+        $totalAmountSum = 0;
+        $data = [];
+
+        foreach ($grouped as $groupKey => $groupItems) {
+            if ($groupItems->count() === 1) {
+                $sel = $groupItems->first();
+                $totalAmountSum += (float) $sel->total_amount;
+                $data[] = $this->formatSelection($sel);
+            } else {
+                $first = $groupItems->first();
+                $combinedTotalAmount = 0;
+                $mergedOrganTests = [];
+                $mergedBiomarkers = [];
+                $combinedHealthCheckCount = 0;
+                $testNames = [];
+
+                foreach ($groupItems as $sel) {
+                    $combinedTotalAmount += (float) $sel->total_amount;
+                    $formatted = $this->formatSelection($sel);
+
+                    if (!empty($formatted['selected_organ_tests'])) {
+                        foreach ($formatted['selected_organ_tests'] as $t) {
+                            $mergedOrganTests[] = $t;
+                            if (!empty($t['name'])) {
+                                $testNames[] = $t['name'];
+                            }
+                        }
+                    }
+
+                    if (!empty($formatted['selected_biomarkers'])) {
+                        foreach ($formatted['selected_biomarkers'] as $bm) {
+                            $mergedBiomarkers[] = $bm;
+                        }
+                    }
+
+                    $combinedHealthCheckCount += (int) ($formatted['organ_health_check_count'] ?? 1);
+                }
+
+                $mergedBiomarkers = array_values(array_unique($mergedBiomarkers));
+                $totalBiomarkers = count($mergedBiomarkers);
+                
+                if (count($mergedOrganTests) > 0 && $combinedHealthCheckCount < count($mergedOrganTests)) {
+                    $combinedHealthCheckCount = count($mergedOrganTests);
+                }
+
+                $totalAmountSum += $combinedTotalAmount;
+                $convertedPrice = number_format((float) CurrencyHelper::convert($combinedTotalAmount, $currency), 2, '.', '');
+
+                $testNames = array_values(array_unique($testNames));
+                if (!empty($testNames)) {
+                    $summary = implode(' • ', $testNames);
+                } else {
+                    $summary = $combinedHealthCheckCount . ' Organ Health Check • ' . $totalBiomarkers . ' Biomarkers';
+                }
+
+                $combinedItem = [
+                    'id' => $first->id,
+                    'user_id' => (int) $first->user_id,
+                    'order_id' => $first->order_id,
+                    'selection_type' => $first->selection_type,
+                    'organ_health_check_count' => (int) $combinedHealthCheckCount,
+                    'total_biomarkers' => (int) $totalBiomarkers,
+                    'summary' => $summary,
+                    'currency' => $currency,
+                    'price' => $convertedPrice,
+                    'status' => (int) $first->status,
+                    'selected_organ_tests' => $mergedOrganTests,
+                    'selected_biomarkers' => $mergedBiomarkers,
+                    'created_at' => $first->created_at ? $first->created_at->format('Y-m-d H:i:s') : null,
+                ];
+
+                if ($first->selection_type === 'package' && $first->package_id) {
+                    $combinedItem['package'] = [
+                        'id' => $first->package_id,
+                        'title' => $first->package_title,
+                        'badge' => $first->package_badge,
+                        'currency' => $currency,
+                        'price' => $convertedPrice,
+                        'selected' => true,
+                        'organ_health_check_count' => (int) $combinedHealthCheckCount,
+                        'total_biomarkers' => (int) $totalBiomarkers,
+                        'summary' => $summary,
+                    ];
+                }
+
+                $data[] = $combinedItem;
+            }
+        }
+
+        return [
+            'total_amount' => $totalAmountSum,
+            'data' => $data,
+        ];
     }
 
     protected function formatSelection(MajorOrganUserSelection $selection): array

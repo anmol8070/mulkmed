@@ -38,6 +38,7 @@ use Illuminate\Support\Facades\Http;
 use Brian2694\Toastr\Facades\Toastr;
 use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
 use Stichoza\GoogleTranslate\GoogleTranslate;
+use App\Helpers\TranslationHelper;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -53,15 +54,12 @@ class DoctorController extends Controller
         $doctor_expertise = DoctorExpertise::where('id','>',1449)->get();
 
         foreach ($doctor_expertise as $key => $value) {
-            $ta = new GoogleTranslate('ar');
-            $value->ar_title = $ta->translate($value->title);
-            $tf = new GoogleTranslate('fr');
-            $value->fr_title = $tf->translate($value->title);
-            $th = new GoogleTranslate('hi');
-            $value->hi_title = $th->translate($value->title);
-            $tu = new GoogleTranslate('ur');
-            $value->ur_title = $tu->translate($value->title);
+            $value->ar_title = TranslationHelper::translate($value->title, 'ar');
+            $value->fr_title = TranslationHelper::translate($value->title, 'fr');
+            $value->hi_title = TranslationHelper::translate($value->title, 'hi');
+            $value->ur_title = TranslationHelper::translate($value->title, 'ur');
             $value->save();
+            usleep(200000); // 200ms delay between batch items to prevent hitting Google rate limit
         }
         return ("done");
     }
@@ -952,18 +950,14 @@ class DoctorController extends Controller
         $item->consultation_fee = $request->consultation_fee;
         $item->experience_year = $request->experience_year;
         $item->category_id = $request->category_id;
-        $ta = new GoogleTranslate('ar');
-        $item->ar_designation = $ta->translate($item->designation);
-        $item->ar_languages_spoken = $ta->translate($item->languages_spoken);
-        $tf = new GoogleTranslate('fr');
-        $item->fr_designation = $tf->translate($item->designation);
-        $item->fr_languages_spoken = $tf->translate($item->languages_spoken);
-        $th = new GoogleTranslate('hi');
-        $item->hi_designation = $th->translate($item->designation);
-        $item->hi_languages_spoken = $th->translate($item->languages_spoken);
-        $tu = new GoogleTranslate('ur');
-        $item->ur_designation = $tu->translate($item->designation);
-        $item->ur_languages_spoken = $tu->translate($item->languages_spoken);
+        $item->ar_designation = TranslationHelper::translate($item->designation, 'ar');
+        $item->ar_languages_spoken = TranslationHelper::translate($item->languages_spoken, 'ar');
+        $item->fr_designation = TranslationHelper::translate($item->designation, 'fr');
+        $item->fr_languages_spoken = TranslationHelper::translate($item->languages_spoken, 'fr');
+        $item->hi_designation = TranslationHelper::translate($item->designation, 'hi');
+        $item->hi_languages_spoken = TranslationHelper::translate($item->languages_spoken, 'hi');
+        $item->ur_designation = TranslationHelper::translate($item->designation, 'ur');
+        $item->ur_languages_spoken = TranslationHelper::translate($item->languages_spoken, 'ur');
         $item->degrees = $request->degrees;
         $item->about_youself = $request->about_youself;
         $item->educational_journey = $request->educational_journey;
@@ -2970,18 +2964,14 @@ class DoctorController extends Controller
                 $category_id = $category->id;
             }
 
-            $ta = new GoogleTranslate('ar');
-            $ar_designation = isset($collection['Designation']) ? $ta->translate($collection['Designation']) : null;
-            $ar_languages_spoken = isset($collection['Languages Known']) ? $ta->translate($collection['Languages Known']) : null;
-            $tf = new GoogleTranslate('fr');
-            $fr_designation =  isset($collection['Designation']) ? $tf->translate($collection['Designation']) : null;
-            $fr_languages_spoken = isset($collection['Languages Known']) ? $tf->translate($collection['Languages Known']) : null;
-            $th = new GoogleTranslate('hi');
-            $hi_designation = isset($collection['Designation']) ? $th->translate($collection['Designation']) : null;
-            $hi_languages_spoken = $th->translate($collection['Languages Known']);
-            $tu = new GoogleTranslate('ur');
-            $ur_designation = isset($collection['Designation']) ? $tu->translate($collection['Designation']) : null;
-            $ur_languages_spoken = isset($collection['Languages Known']) ? $tu->translate($collection['Languages Known']) : null;
+            $ar_designation = isset($collection['Designation']) ? TranslationHelper::translate($collection['Designation'], 'ar') : null;
+            $ar_languages_spoken = isset($collection['Languages Known']) ? TranslationHelper::translate($collection['Languages Known'], 'ar') : null;
+            $fr_designation = isset($collection['Designation']) ? TranslationHelper::translate($collection['Designation'], 'fr') : null;
+            $fr_languages_spoken = isset($collection['Languages Known']) ? TranslationHelper::translate($collection['Languages Known'], 'fr') : null;
+            $hi_designation = isset($collection['Designation']) ? TranslationHelper::translate($collection['Designation'], 'hi') : null;
+            $hi_languages_spoken = isset($collection['Languages Known']) ? TranslationHelper::translate($collection['Languages Known'], 'hi') : null;
+            $ur_designation = isset($collection['Designation']) ? TranslationHelper::translate($collection['Designation'], 'ur') : null;
+            $ur_languages_spoken = isset($collection['Languages Known']) ? TranslationHelper::translate($collection['Languages Known'], 'ur') : null;
 
             $supportMail1   = isset($collection['Support mail1']) && trim($collection['Support mail1']) !== '' 
                 ? trim($collection['Support mail1']) 
@@ -3058,14 +3048,10 @@ class DoctorController extends Controller
                     if (trim($line) !== '') {
                         $item = new DoctorExpertise();
                         $item->title = GlobalFunction::cleanString($line);
-                        $ta = new GoogleTranslate('ar');
-                        $item->ar_title = $ta->translate($item->title);
-                        $tf = new GoogleTranslate('fr');
-                        $item->fr_title = $tf->translate($item->title);
-                        $th = new GoogleTranslate('hi');
-                        $item->hi_title = $th->translate($item->title);
-                        $tu = new GoogleTranslate('ur');
-                        $item->ur_title = $tu->translate($item->title);
+                        $item->ar_title = TranslationHelper::translate($item->title, 'ar');
+                        $item->fr_title = TranslationHelper::translate($item->title, 'fr');
+                        $item->hi_title = TranslationHelper::translate($item->title, 'hi');
+                        $item->ur_title = TranslationHelper::translate($item->title, 'ur');
                         $item->doctor_id = $id;
                         $item->save();
                     }
@@ -3627,14 +3613,10 @@ class DoctorController extends Controller
             
             if($title != null)
             {
-                $ta = new GoogleTranslate('ar');
-                $ar_title = $ta->translate($title);   
-                $tf = new GoogleTranslate('fr');
-                $fr_title = $tf->translate($title);
-                $th = new GoogleTranslate('hi');
-                $hi_title = $th->translate($title);
-                $tu = new GoogleTranslate('ur');
-                $ur_title = $tu->translate($title);
+                $ar_title = TranslationHelper::translate($title, 'ar');   
+                $fr_title = TranslationHelper::translate($title, 'fr');
+                $hi_title = TranslationHelper::translate($title, 'hi');
+                $ur_title = TranslationHelper::translate($title, 'ur');
             }else{
                 $ar_title = null;
                 $fr_title = null;
@@ -3644,14 +3626,10 @@ class DoctorController extends Controller
 
             if($info != null)
             {
-                $ta = new GoogleTranslate('ar');
-                $ar_info = $ta->translate($info);   
-                $tf = new GoogleTranslate('fr');
-                $fr_info = $tf->translate($info);
-                $th = new GoogleTranslate('hi');
-                $hi_info = $th->translate($info);
-                $tu = new GoogleTranslate('ur');
-                $ur_info = $tu->translate($info);
+                $ar_info = TranslationHelper::translate($info, 'ar');   
+                $fr_info = TranslationHelper::translate($info, 'fr');
+                $hi_info = TranslationHelper::translate($info, 'hi');
+                $ur_info = TranslationHelper::translate($info, 'ur');
             }else{
                 $ar_info = null;
                 $fr_info = null;

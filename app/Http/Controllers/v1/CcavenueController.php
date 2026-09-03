@@ -1153,21 +1153,69 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                     $ai_vital_misa->payment_type = $responseData['merchant_param5'];
                     $ai_vital_misa->save();
 
-                    // If it's a longevity plan purchase and plan_id is valid
-                    if ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType && $ai_vital_misa->plan_id) {
-                        $longevityPlan = LongevityPlan::find($ai_vital_misa->plan_id);
-                        if ($longevityPlan) {
-                            $expiryDate = null;
-                            if (!empty($longevityPlan->plan_expiry_days)) {
-                                $expiryDate = \Carbon\Carbon::now()->addDays((int)$longevityPlan->plan_expiry_days)->format('Y-m-d');
-                            }
-                            UserLongevityPlan::create([
-                                'user_id' => $ai_vital_misa->user_id,
-                                'plan_id' => $ai_vital_misa->plan_id,
+                    // If it's a longevity plan / major organ purchase
+                    if (($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType || $responseData['merchant_param5'] == Constants::CCAvenueMajorOrganPaymentType)) {
+                        Log::info('successAIVitalScan longevity payment success', [
+                            'order_id' => $responseData['order_id'],
+                            'user_id' => $ai_vital_misa->user_id,
+                        ]);
+
+                        // 1. Update MajorOrganUserSelection
+                        $selection = \App\Models\MajorOrganUserSelection::where('order_id', $responseData['order_id'])->first();
+                        if (!$selection && isset($ai_vital_misa->user_id)) {
+                            $selection = \App\Models\MajorOrganUserSelection::where('user_id', $ai_vital_misa->user_id)
+                                ->where('payment_status', 0)
+                                ->latest()
+                                ->first();
+                        }
+                        if (!$selection && !empty($responseData['merchant_param4']) && is_numeric($responseData['merchant_param4'])) {
+                            $selection = \App\Models\MajorOrganUserSelection::find($responseData['merchant_param4']);
+                        }
+                        if ($selection) {
+                            $selection->payment_status = 1;
+                            $selection->status = 1;
+                            $selection->order_id = $responseData['order_id'];
+                            $selection->save();
+
+                            Log::info('successAIVitalScan: updated MajorOrganUserSelection in DB', [
                                 'order_id' => $responseData['order_id'],
-                                'amount' => $responseData['amount'],
-                                'status' => 'active',
-                                'expiry_date' => $expiryDate,
+                                'selection_id' => $selection->id,
+                                'payment_status' => 1,
+                                'status' => 1,
+                            ]);
+                        }
+
+                        // 2. Create UserLongevityPlan entry as ONE SINGLE ROW
+                        $planIdsString = $responseData['merchant_param4'] ?? ($selection->plan_id ?? ($ai_vital_misa->plan_id ?? null));
+                        if ($planIdsString) {
+                            $planIds = array_values(array_filter(array_map('trim', explode(',', $planIdsString))));
+                            $combinedPlanIdsStr = implode(',', $planIds);
+                            
+                            $maxExpiryDays = 0;
+                            foreach ($planIds as $pid) {
+                                $longevityPlan = LongevityPlan::find($pid);
+                                if ($longevityPlan && !empty($longevityPlan->plan_expiry_days)) {
+                                    $maxExpiryDays = max($maxExpiryDays, (int)$longevityPlan->plan_expiry_days);
+                                }
+                            }
+
+                            $expiryDate = $maxExpiryDays > 0 ? \Carbon\Carbon::now()->addDays($maxExpiryDays)->format('Y-m-d') : null;
+
+                            UserLongevityPlan::updateOrCreate(
+                                ['order_id' => $responseData['order_id']],
+                                [
+                                    'user_id' => $ai_vital_misa->user_id,
+                                    'plan_id' => $combinedPlanIdsStr,
+                                    'amount' => $responseData['amount'],
+                                    'status' => 1,
+                                    'expiry_date' => $expiryDate,
+                                ]
+                            );
+
+                            Log::info('successAIVitalScan: stored single combined UserLongevityPlan in DB', [
+                                'order_id' => $responseData['order_id'],
+                                'plan_id' => $combinedPlanIdsStr,
+                                'user_id' => $ai_vital_misa->user_id,
                             ]);
                         }
                     }
@@ -1332,18 +1380,20 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                 $amount = CurrencyHelper::convert(5, $currency);
             }
 
-            Log::info('Longevity payment amount resolved', [
+            $actualReportFrom = $request->report_from ?? $request->report_form ?? $request->report ?? 'longevity';
+
+            Log::info('Initiating longevity payment request', [
                 'user_id' => $request->user_id,
+                'plan_id' => $request->plan_id,
+                'order_id' => $order_id,
+                'report_from' => $actualReportFrom,
                 'payable_amount' => $request->payable_amount,
-                'amount' => $request->amount,
-                'order_summary_payable' => $orderSummaryPayable,
-                'final_amount' => $amount,
+                'amount' => $amount,
             ]);
 
             $ai_vital_misa = new AIVitalScanMisa();
             $ai_vital_misa->user_id = $request->user_id;
             $ai_vital_misa->order_id = $order_id;
-            $actualReportFrom = $request->report_from ?? $request->report_form ?? $request->report ?? 'longevity';
             $ai_vital_misa->report_from = $actualReportFrom;
             $ai_vital_misa->payment_status = 0;
             $ai_vital_misa->payment_amount = $amount;
@@ -1377,39 +1427,86 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
 
             $ai_vital_misa->save();
 
-            // Save in major_organ_user_selections as per the requested plan_id array
-            if ($request->has('plan_id') && is_array($request->plan_id)) {
-                foreach ($request->plan_id as $pid) {
-                    $test = \App\Models\MajorOrganTest::find($pid);
-                    
-                    $selection = new \App\Models\MajorOrganUserSelection();
-                    $selection->user_id = $request->user_id;
-                    $selection->plan_id = $pid;
-                    $selection->selection_type = $actualReportFrom;
-                    
-                    // Apportioning the total amount for each plan evenly
-                    $selection->total_amount = count($request->plan_id) > 0 ? ($amount / count($request->plan_id)) : $amount; 
-                    
-                    $selection->order_id = $order_id;
-                    $selection->status = 2; // status for initiated/pending
-                    $selection->payment_status = 0;
-                    
-                    if ($test) {
-                        $biomarkers = is_array($test->biomarkers) ? $test->biomarkers : [];
-                        $selection->selected_organ_tests = [[
-                            'id' => $test->id,
-                            'name' => $test->name,
-                            'icon' => !empty($test->icon) ? ltrim($test->icon, '/') : null,
-                            'price' => number_format((float) $test->price, 2, '.', ''),
-                            'biomarker_count' => count($biomarkers),
-                            'biomarkers' => $biomarkers,
-                        ]];
-                        $selection->selected_biomarkers = array_values(array_unique($biomarkers));
-                        $selection->organ_health_check_count = 1;
-                        $selection->total_biomarkers = count($selection->selected_biomarkers);
+            // Save in major_organ_user_selections as ONE single combined entry
+            if ($request->has('plan_id')) {
+                $planIds = is_array($request->plan_id) ? $request->plan_id : [$request->plan_id];
+                $planIds = array_values(array_filter(array_unique(array_map('intval', $planIds))));
+
+                if (!empty($planIds)) {
+                    $combinedOrganTests = [];
+                    $combinedBiomarkers = [];
+
+                    foreach ($planIds as $pid) {
+                        $test = \App\Models\MajorOrganTest::find($pid);
+                        $longevityPlan = \App\Models\LongevityPlan::find($pid);
+
+                        if ($test) {
+                            $biomarkers = is_array($test->biomarkers) ? $test->biomarkers : [];
+                            $combinedOrganTests[] = [
+                                'id' => $test->id,
+                                'name' => $test->name,
+                                'icon' => !empty($test->icon) ? ltrim($test->icon, '/') : null,
+                                'price' => number_format((float) $test->price, 2, '.', ''),
+                                'biomarker_count' => count($biomarkers),
+                                'biomarkers' => $biomarkers,
+                            ];
+                            foreach ($biomarkers as $bm) {
+                                $combinedBiomarkers[] = $bm;
+                            }
+                        } elseif ($longevityPlan) {
+                            $combinedOrganTests[] = [
+                                'id' => $longevityPlan->id,
+                                'name' => $longevityPlan->title,
+                                'icon' => !empty($longevityPlan->image) ? ltrim($longevityPlan->image, '/') : null,
+                                'price' => number_format((float) $longevityPlan->price, 2, '.', ''),
+                                'biomarker_count' => 0,
+                                'biomarkers' => [],
+                            ];
+                        }
                     }
-                    
+
+                    $combinedBiomarkers = array_values(array_unique($combinedBiomarkers));
+
+                    try {
+                        \Illuminate\Support\Facades\DB::statement("ALTER TABLE major_organ_user_selections MODIFY COLUMN plan_id VARCHAR(255) NULL DEFAULT NULL");
+                        \Illuminate\Support\Facades\DB::statement("ALTER TABLE user_longevity_plans MODIFY COLUMN plan_id VARCHAR(255) NULL DEFAULT NULL");
+                        \Illuminate\Support\Facades\DB::statement("ALTER TABLE ai_vitals MODIFY COLUMN plan_id VARCHAR(255) NULL DEFAULT NULL");
+                    } catch (\Throwable $th) {
+                    }
+
+                    $combinedPlanIdsString = implode(',', $planIds);
+
+                    // Reuse existing unpaid selection row for this user or create a single row
+                    $selection = \App\Models\MajorOrganUserSelection::where('user_id', (int) $request->user_id)
+                        ->where('payment_status', 0)
+                        ->latest()
+                        ->first();
+
+                    if (!$selection) {
+                        $selection = new \App\Models\MajorOrganUserSelection();
+                        $selection->user_id = (int) $request->user_id;
+                        $selection->selection_type = $actualReportFrom;
+                    }
+
+                    $selection->plan_id = $combinedPlanIdsString;
+                    $selection->selection_type = $actualReportFrom;
+                    $selection->total_amount = $amount;
+                    $selection->order_id = $order_id;
+                    $selection->status = 2; // status 2 = checkout initiated / pending
+                    $selection->payment_status = 0;
+                    $selection->selected_organ_tests = $combinedOrganTests;
+                    $selection->selected_biomarkers = $combinedBiomarkers;
+                    $selection->organ_health_check_count = count($combinedOrganTests);
+                    $selection->total_biomarkers = count($combinedBiomarkers);
                     $selection->save();
+
+                    Log::info('Saved combined MajorOrganUserSelection for longevity payment', [
+                        'order_id' => $order_id,
+                        'selection_id' => $selection->id,
+                        'user_id' => $request->user_id,
+                        'plan_ids' => $planIds,
+                        'total_amount' => $amount,
+                    ]);
                 }
             }
 
@@ -1947,13 +2044,16 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
             ]);
 
             $workingKey = env('CCAVENUE_WORKING_KEY');
-            $encResponse = $request->input('encResp');
+            $encResponse = $request->input('encResp') ?? $request->input('encResponse');
 
             $meeting_link = '';
 
             if(!$encResponse)
             {
-                return response('No enResp', 400);
+                return response()->json([
+                    'status' => false,
+                    'message' => 'No encResp provided. CCAvenue payment response requires a valid encrypted payload.'
+                ], 400);
             }
 
             // Decrypt CCAvenue response
@@ -2075,55 +2175,90 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                         $ai_vital_misa->payment_type = $responseData['merchant_param5'];
                         $ai_vital_misa->save();
 
-                        // If it's a longevity plan purchase
-                        $planIdsString = $responseData['merchant_param4'] ?? null;
-                        if ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType) {
-                            if ($planIdsString) {
-                                $planIds = explode(',', $planIdsString);
-                                foreach ($planIds as $pid) {
-                                    $longevityPlan = LongevityPlan::find($pid);
-                            if ($longevityPlan) {
-                                $expiryDate = null;
-                                if (!empty($longevityPlan->plan_expiry_days)) {
-                                    $expiryDate = \Carbon\Carbon::now()->addDays((int)$longevityPlan->plan_expiry_days)->format('Y-m-d');
+                        Log::info('Longevity CCAvenue payment successful', [
+                            'order_id' => $responseData['order_id'],
+                            'merchant_param5' => $responseData['merchant_param5'],
+                            'amount' => $responseData['amount'] ?? null,
+                            'user_id' => $ai_vital_misa->user_id,
+                        ]);
+
+                        // 1. Update MajorOrganUserSelection status & payment_status
+                        $selection = \App\Models\MajorOrganUserSelection::where('order_id', $responseData['order_id'])->first();
+                        if (!$selection && isset($ai_vital_misa->user_id)) {
+                            $selection = \App\Models\MajorOrganUserSelection::where('user_id', $ai_vital_misa->user_id)
+                                ->where('payment_status', 0)
+                                ->latest()
+                                ->first();
+                        }
+                        if (!$selection && !empty($responseData['merchant_param4']) && is_numeric($responseData['merchant_param4'])) {
+                            $selection = \App\Models\MajorOrganUserSelection::find($responseData['merchant_param4']);
+                        }
+                        if ($selection) {
+                            $selection->payment_status = 1;
+                            $selection->status = 1; // 1 = active / purchased selection
+                            $selection->order_id = $responseData['order_id'];
+                            $selection->save();
+
+                            Log::info('Longevity payment success: updated MajorOrganUserSelection in DB', [
+                                'order_id' => $responseData['order_id'],
+                                'selection_id' => $selection->id,
+                                'user_id' => $selection->user_id,
+                                'payment_status' => 1,
+                                'status' => 1,
+                            ]);
+                        }
+
+                        // 2. Process Longevity Plan / Major Organ DB entries as ONE SINGLE ROW for UserLongevityPlan & AI_Vital
+                        $planIdsString = $responseData['merchant_param4'] ?? ($selection->plan_id ?? ($ai_vital_misa->plan_id ?? null));
+                        if ($planIdsString) {
+                            $planIds = array_values(array_filter(array_map('trim', explode(',', $planIdsString))));
+                            $combinedPlanIdsStr = implode(',', $planIds);
+                            
+                            $maxExpiryDays = 0;
+                            foreach ($planIds as $pid) {
+                                $longevityPlan = LongevityPlan::find($pid);
+                                if ($longevityPlan && !empty($longevityPlan->plan_expiry_days)) {
+                                    $maxExpiryDays = max($maxExpiryDays, (int)$longevityPlan->plan_expiry_days);
                                 }
-                                UserLongevityPlan::firstOrCreate(
-                                            ['order_id' => $responseData['order_id'], 'plan_id' => $pid],
-                                    [
-                                        'user_id' => $ai_vital_misa->user_id,
-                                                'amount' => count($planIds) > 0 ? ($responseData['amount'] / count($planIds)) : $responseData['amount'],
-                                        'status' => 1,
-                                        'expiry_date' => $expiryDate,
-                                    ]
-                                );
                             }
 
-                            // Always link to ai_vitals table for longevity purchases
-                                \App\Models\AI_Vital::create([
+                            $expiryDate = $maxExpiryDays > 0 ? \Carbon\Carbon::now()->addDays($maxExpiryDays)->format('Y-m-d') : null;
+
+                            UserLongevityPlan::updateOrCreate(
+                                ['order_id' => $responseData['order_id']],
+                                [
                                     'user_id' => $ai_vital_misa->user_id,
-                                        'plan_id' => $pid,
-                                    'is_longevity' => 1,
-                                    'scan_date' => \Carbon\Carbon::now()->format('Y-m-d'),
-                                    'report' => '',
-                                    'senoclock_ai_response' => [],
-                                    'shen_ai' => [],
-                                ]);
-                                }
-                            }
-                        } else if ($responseData['merchant_param5'] == Constants::CCAvenueMajorOrganPaymentType) {
-                            $selectionId = $responseData['merchant_param4'] ?? null;
-                            if ($selectionId) {
-                                $selection = \App\Models\MajorOrganUserSelection::find($selectionId);
-                                if ($selection) {
-                                    // Duplicate the selection to create a new entry instead of updating the existing one
-                                    $newSelection = $selection->replicate();
-                                    $newSelection->status = 2; // Purchased
-                                    $newSelection->order_id = $responseData['order_id'];
-                                    $newSelection->payment_status = 1;
-                                    $newSelection->plan_id = $selectionId; // Store the original cart item ID in plan_id
-                                    $newSelection->save();
-                                }
-                            }
+                                    'plan_id' => $combinedPlanIdsStr,
+                                    'amount' => $responseData['amount'],
+                                    'status' => 1,
+                                    'expiry_date' => $expiryDate,
+                                ]
+                            );
+
+                            Log::info('Longevity payment success: stored single combined UserLongevityPlan in DB', [
+                                'order_id' => $responseData['order_id'],
+                                'plan_id' => $combinedPlanIdsStr,
+                                'user_id' => $ai_vital_misa->user_id,
+                                'status' => 1,
+                                'expiry_date' => $expiryDate,
+                            ]);
+
+                            \App\Models\AI_Vital::create([
+                                'user_id' => $ai_vital_misa->user_id,
+                                'plan_id' => $combinedPlanIdsStr,
+                                'is_longevity' => 1,
+                                'scan_date' => \Carbon\Carbon::now()->format('Y-m-d'),
+                                'report' => '',
+                                'senoclock_ai_response' => [],
+                                'shen_ai' => [],
+                            ]);
+
+                            Log::info('Longevity payment success: stored single combined AI_Vital in DB', [
+                                'order_id' => $responseData['order_id'],
+                                'plan_id' => $combinedPlanIdsStr,
+                                'user_id' => $ai_vital_misa->user_id,
+                                'is_longevity' => 1,
+                            ]);
                         }
                     }
 
@@ -2131,6 +2266,11 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                         $ai_vital_misa->payment_status = Constants::AIVitalsPaymentFailureStatus;
                         $ai_vital_misa->payment_type = $responseData['merchant_param5'];
                         $ai_vital_misa->save();
+
+                        Log::info('Longevity payment failed', [
+                            'order_id' => $responseData['order_id'],
+                            'merchant_param5' => $responseData['merchant_param5'],
+                        ]);
                     }
                 }
 

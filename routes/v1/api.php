@@ -206,8 +206,8 @@ use App\Http\Controllers\v1\PatientEmrReportController;
     });
 
     // CCAvenue payment response
-    Route::post('/payment-response', [CcavenueController::class, 'ccavenue_payment_response']);
-    Route::post('/payment-cancel', [CcavenueController::class, 'ccavenue_payment_cancel']);
+    Route::match(['get', 'post'], '/payment-response', [CcavenueController::class, 'ccavenue_payment_response']);
+    Route::match(['get', 'post'], '/payment-cancel', [CcavenueController::class, 'ccavenue_payment_cancel']);
     Route::post('/payment/ccavenue/webhook', [CcavenueController::class, 'ccavenue_payment_webhook']);
 
 
