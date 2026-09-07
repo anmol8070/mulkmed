@@ -14,6 +14,8 @@ class UserLongevityPlan extends Model
     protected $fillable = [
         'user_id',
         'plan_id',
+        'longevity_plan_ids',
+        'package_id',
         'order_id',
         'amount',
         'status',

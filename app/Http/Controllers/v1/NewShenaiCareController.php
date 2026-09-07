@@ -131,9 +131,12 @@ class NewShenaiCareController extends Controller
         $clinicalTriggers = [];
         $triggersSource = $senoclockData['data']['trigger'] ?? $senoclockData['trigger'] ?? [];
         if (!empty($triggersSource) && is_array($triggersSource)) {
-            $triggersSource = array_slice($triggersSource, 0, 5);
             $triggerId = 1;
             foreach ($triggersSource as $trig) {
+                if (!$this->isTriggerRelatedToPriorityParameters($trig, $priorityParameters)) {
+                    continue;
+                }
+
                 $matchedConditions = [];
                 if (isset($trig['matched_conditions']) && is_array($trig['matched_conditions'])) {
                     foreach ($trig['matched_conditions'] as $mc) {
@@ -147,13 +150,17 @@ class NewShenaiCareController extends Controller
                 $icon = 'uploads/wellness.png';
 
                 $clinicalTriggers[] = [
-'id' => $triggerId++,
+                    'id' => $triggerId++,
                     'title' => $trig['trigger_name'] ?? 'Trigger',
                     'description' => $trig['trigger_description'] ?? '',
                     'matched_conditions' => $matchedConditions,
                     'associated_organ_health' => $trig['associated_organ_health'] ?? '',
                     'icon' => $icon
                 ];
+
+                if (count($clinicalTriggers) >= 5) {
+                    break;
+                }
             }
         }
 
@@ -955,6 +962,88 @@ Rules:
         ];
     }
 
+    /**
+     * Check if a clinical trigger is related to any parameter present in Priority Parameters.
+     */
+    protected function isTriggerRelatedToPriorityParameters(array $trig, array $priorityParameters): bool
+    {
+        if (empty($priorityParameters)) {
+            return false;
+        }
+
+        $activeKeys = [];
+        $activeNames = [];
+        foreach ($priorityParameters as $param) {
+            if (!empty($param['key'])) {
+                $activeKeys[] = strtolower($param['key']);
+            }
+            if (!empty($param['name'])) {
+                $activeNames[] = strtolower($param['name']);
+            }
+        }
+
+        $conditionStrings = [];
+        if (isset($trig['matched_conditions']) && is_array($trig['matched_conditions'])) {
+            foreach ($trig['matched_conditions'] as $mc) {
+                if (is_array($mc)) {
+                    if (!empty($mc['parameter_name'])) {
+                        $conditionStrings[] = (string) $mc['parameter_name'];
+                    }
+                    if (!empty($mc['matched_condition'])) {
+                        $conditionStrings[] = (string) $mc['matched_condition'];
+                    }
+                    if (!empty($mc['name'])) {
+                        $conditionStrings[] = (string) $mc['name'];
+                    }
+                    if (!empty($mc['key'])) {
+                        $conditionStrings[] = (string) $mc['key'];
+                    }
+                } elseif (is_string($mc)) {
+                    $conditionStrings[] = $mc;
+                }
+            }
+        }
+
+        if (!empty($conditionStrings)) {
+            foreach ($conditionStrings as $condStr) {
+                $resolved = $this->resolveParameterDetails($condStr, null, []);
+                $resolvedKey = strtolower($resolved['key'] ?? '');
+                $resolvedName = strtolower($resolved['name'] ?? '');
+
+                if (in_array($resolvedKey, $activeKeys) || in_array($resolvedName, $activeNames)) {
+                    return true;
+                }
+
+                $condStrLower = strtolower($condStr);
+                foreach ($activeNames as $actName) {
+                    if ($actName !== '' && (str_contains($condStrLower, $actName) || str_contains($actName, $condStrLower))) {
+                        return true;
+                    }
+                }
+                foreach ($activeKeys as $actKey) {
+                    if ($actKey !== '' && (str_contains($condStrLower, $actKey) || str_contains($actKey, $condStrLower))) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        $triggerText = strtolower(($trig['trigger_name'] ?? '') . ' ' . ($trig['trigger_description'] ?? ''));
+        foreach ($activeNames as $actName) {
+            if ($actName !== '' && str_contains($triggerText, $actName)) {
+                return true;
+            }
+        }
+        foreach ($activeKeys as $actKey) {
+            if ($actKey !== '' && str_contains($triggerText, $actKey)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     protected function ensureSchema(): void
     {
         if (Schema::hasTable('ai_vitals') && !Schema::hasColumn('ai_vitals', 'senoclock_ai_response')) {
@@ -1174,19 +1263,30 @@ Rules:
             ], 400);
         }
 
-        $planId = $request->query('plan_id', $request->input('plan_id'));
+        $filterPlanId = $request->query('plan_id', $request->input('plan_id'));
 
-        $query = UserLongevityPlan::with('plan')->where('user_id', $userId)->orderBy('id', 'desc');
-        if (!empty($planId)) {
-            $query->where('plan_id', $planId);
+        $query = UserLongevityPlan::where('user_id', $userId)
+            ->where(function ($q) {
+                $q->where('status', 1)->orWhere('status', 'active');
+            })
+            ->orderBy('id', 'desc');
+        if (!empty($filterPlanId)) {
+            $query->where(function ($q) use ($filterPlanId) {
+                $q->where('plan_id', $filterPlanId);
+                if (Schema::hasColumn('user_longevity_plans', 'longevity_plan_ids')) {
+                    $q->orWhere('longevity_plan_ids', $filterPlanId)
+                      ->orWhereRaw("FIND_IN_SET(?, longevity_plan_ids)", [$filterPlanId]);
+                }
+            });
         }
         $userPlans = $query->get();
-        $today = \Carbon\Carbon::today();
 
         $data = [];
+        $processedPlanIds = [];
+
         foreach ($userPlans as $up) {
             // Check expiry and update if needed
-            if ($up->status === 'active' && !empty($up->expiry_date)) {
+            if (($up->status == 1 || $up->status === 'active') && !empty($up->expiry_date)) {
                 $expiryDate = \Carbon\Carbon::parse($up->expiry_date);
                 if ($expiryDate->isPast() && !$expiryDate->isToday()) {
                     $up->status = 'expired';
@@ -1194,18 +1294,66 @@ Rules:
                 }
             }
 
-            if ($up->plan) {
-                $data[] = [
-                    'id' => $up->plan->id,
-                    'title' => $up->plan->title,
-                    'subtitle' => $up->plan->subtitle,
-                    'image' => !empty($up->plan->image) ? GlobalFunction::createMediaUrl($up->plan->image) : null,
-                    'whats_included' => is_string($up->plan->whats_included) ? json_decode($up->plan->whats_included, true) : $up->plan->whats_included,
-                    'benefits' => is_string($up->plan->benefits) ? json_decode($up->plan->benefits, true) : $up->plan->benefits,
-                'status' => $up->status,
-                'expiry_date' => $up->expiry_date,
-                'purchased_at' => $up->created_at->format('Y-m-d H:i:s'),
-            ];
+            // Extract plan IDs from longevity_plan_ids or plan_id
+            $rawPlanIds = !empty($up->longevity_plan_ids) ? $up->longevity_plan_ids : $up->plan_id;
+            if ($rawPlanIds) {
+                $pids = array_values(array_filter(array_map('trim', explode(',', (string) $rawPlanIds))));
+                foreach ($pids as $pid) {
+                    if (empty($pid)) continue;
+                    $key = $pid . '_' . ($up->id ?? 0);
+                    if (in_array($key, $processedPlanIds)) continue;
+                    $processedPlanIds[] = $key;
+
+                    $plan = LongevityPlan::find($pid);
+                    if ($plan) {
+                        $data[] = [
+                            'id' => $plan->id,
+                            'title' => $plan->title,
+                            'subtitle' => $plan->subtitle,
+                            'image' => !empty($plan->image) ? GlobalFunction::createMediaUrl($plan->image) : null,
+                            'whats_included' => is_string($plan->whats_included) ? json_decode($plan->whats_included, true) : $plan->whats_included,
+                            'benefits' => is_string($plan->benefits) ? json_decode($plan->benefits, true) : $plan->benefits,
+                            'status' => $up->status == 1 ? 'active' : (string) $up->status,
+                            'expiry_date' => $up->expiry_date,
+                            'purchased_at' => $up->created_at ? $up->created_at->format('Y-m-d H:i:s') : null,
+                        ];
+                    }
+                }
+            }
+        }
+
+        // Fallback / supplement from MajorOrganUserSelection if no user_longevity_plans found
+        if (empty($data)) {
+            $selectionsQuery = \App\Models\MajorOrganUserSelection::where('user_id', $userId)
+                ->where('payment_status', 1)
+                ->orderBy('id', 'desc');
+
+            $selections = $selectionsQuery->get();
+            foreach ($selections as $sel) {
+                $rawIds = !empty($sel->longevity_plan_ids) ? $sel->longevity_plan_ids : $sel->plan_id;
+                if ($rawIds) {
+                    $pids = array_values(array_filter(array_map('trim', explode(',', (string) $rawIds))));
+                    foreach ($pids as $pid) {
+                        $plan = LongevityPlan::find($pid);
+                        if ($plan) {
+                            $key = $plan->id . '_sel_' . $sel->id;
+                            if (in_array($key, $processedPlanIds)) continue;
+                            $processedPlanIds[] = $key;
+
+                            $data[] = [
+                                'id' => $plan->id,
+                                'title' => $plan->title,
+                                'subtitle' => $plan->subtitle,
+                                'image' => !empty($plan->image) ? GlobalFunction::createMediaUrl($plan->image) : null,
+                                'whats_included' => is_string($plan->whats_included) ? json_decode($plan->whats_included, true) : $plan->whats_included,
+                                'benefits' => is_string($plan->benefits) ? json_decode($plan->benefits, true) : $plan->benefits,
+                                'status' => 'active',
+                                'expiry_date' => null,
+                                'purchased_at' => $sel->created_at ? $sel->created_at->format('Y-m-d H:i:s') : null,
+                            ];
+                        }
+                    }
+                }
             }
         }
 

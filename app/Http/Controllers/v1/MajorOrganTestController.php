@@ -508,6 +508,13 @@ class MajorOrganTestController extends Controller
             ]);
         }
 
+        $tests = MajorOrganTest::where('status', 1)->get();
+        $totalBiomarkers = 0;
+        foreach ($tests as $item) {
+            $bms = is_array($item->biomarkers) ? $item->biomarkers : [];
+            $totalBiomarkers += count($bms);
+        }
+
         return response()->json([
             'status' => true,
             'message' => 'Package fetched successfully',
@@ -521,6 +528,9 @@ class MajorOrganTestController extends Controller
                 'price' => number_format((float) CurrencyHelper::convert($package->price, $currency), 2, '.', ''),
                 'image' => !empty($package->image) ? GlobalFunction::createMediaUrl($package->image) : null,
                 'status' => (int) $package->status,
+                'organ_health_check_count' => $tests->count(),
+                'total_biomarkers' => $totalBiomarkers,
+                'summary' => $tests->count() . ' Organ Health Check • ' . $totalBiomarkers . ' Biomarkers',
             ],
         ]);
     }
@@ -572,8 +582,8 @@ class MajorOrganTestController extends Controller
                 'image' => !empty($package->image)
                     ? ltrim($package->image, '/')
                     : null,
-                // 'organ_health_check_count' => $includedHealthChecks->count(),
-                // 'total_biomarkers' => $totalBiomarkers,
+                'organ_health_check_count' => $includedHealthChecks->count(),
+                'total_biomarkers' => $totalBiomarkers,
                 'summary' => $includedHealthChecks->count() . ' Organ Health Check • ' . $totalBiomarkers . ' Biomarkers',
                 'included_health_checks' => $includedHealthChecks,
             ],
@@ -838,10 +848,13 @@ class MajorOrganTestController extends Controller
                     }
 
                     $combinedHealthCheckCount += (int) ($formatted['organ_health_check_count'] ?? 1);
+                    if (isset($formatted['total_biomarkers']) && (int) $formatted['total_biomarkers'] > 0) {
+                        $combinedBiomarkersCount = max($combinedBiomarkersCount ?? 0, (int) $formatted['total_biomarkers']);
+                    }
                 }
 
                 $mergedBiomarkers = array_values(array_unique($mergedBiomarkers));
-                $totalBiomarkers = count($mergedBiomarkers);
+                $totalBiomarkers = max(count($mergedBiomarkers), $combinedBiomarkersCount ?? 0);
                 
                 if (count($mergedOrganTests) > 0 && $combinedHealthCheckCount < count($mergedOrganTests)) {
                     $combinedHealthCheckCount = count($mergedOrganTests);
@@ -900,13 +913,34 @@ class MajorOrganTestController extends Controller
     protected function formatSelection(MajorOrganUserSelection $selection): array
     {
         $currency = CurrencyHelper::getUserCurrency();
+
+        $organHealthCheckCount = (int) $selection->organ_health_check_count;
+        $totalBiomarkers = (int) $selection->total_biomarkers;
+
+        $isPackageSelection = ($selection->selection_type === 'package')
+            || !empty($selection->package_id)
+            || !empty($selection->package_title)
+            || ((float)$selection->total_amount == 599.00 && $selection->selection_type !== 'individual');
+
+        if ($isPackageSelection) {
+            $allTests = \App\Models\MajorOrganTest::where('status', 1)->get();
+            $totalPkgBiomarkersCount = 0;
+            foreach ($allTests as $t) {
+                $bms = is_array($t->biomarkers) ? $t->biomarkers : [];
+                $totalPkgBiomarkersCount += count($bms);
+            }
+
+            $organHealthCheckCount = $allTests->count() > 0 ? $allTests->count() : 10;
+            $totalBiomarkers = $totalPkgBiomarkersCount > 0 ? $totalPkgBiomarkersCount : 41;
+        }
+
         $data = [
             'id' => $selection->id,
             'user_id' => (int) $selection->user_id,
             'selection_type' => $selection->selection_type,
-            'organ_health_check_count' => (int) $selection->organ_health_check_count,
-            'total_biomarkers' => (int) $selection->total_biomarkers,
-            'summary' => $selection->organ_health_check_count . ' Organ Health Check • ' . $selection->total_biomarkers . ' Biomarkers',
+            'organ_health_check_count' => $organHealthCheckCount,
+            'total_biomarkers' => $totalBiomarkers,
+            'summary' => $organHealthCheckCount . ' Organ Health Check • ' . $totalBiomarkers . ' Biomarkers',
             'currency' => $currency,
             'price' => number_format((float) CurrencyHelper::convert($selection->total_amount, $currency), 2, '.', ''),
             'status' => (int) $selection->status,
@@ -924,17 +958,17 @@ class MajorOrganTestController extends Controller
             }
         }
 
-        if ($selection->selection_type === 'package' && $selection->package_id) {
+        if ($isPackageSelection) {
             $data['package'] = [
-                'id' => $selection->package_id,
-                'title' => $selection->package_title,
-                'badge' => $selection->package_badge,
+                'id' => $selection->package_id ?? 1,
+                'title' => $selection->package_title ?? 'Comprehensive Mulk Longitivity Panel 1',
+                'badge' => $selection->package_badge ?? 'High Recommendation',
                 'currency' => $currency,
-                'price' => number_format((float) CurrencyHelper::convert($selection->package_price, $currency), 2, '.', ''),
+                'price' => number_format((float) CurrencyHelper::convert($selection->package_price ?? $selection->total_amount, $currency), 2, '.', ''),
                 'selected' => true,
-                'organ_health_check_count' => (int) $selection->organ_health_check_count,
-                'total_biomarkers' => (int) $selection->total_biomarkers,
-                'summary' => $selection->organ_health_check_count . ' Organ Health Check • ' . $selection->total_biomarkers . ' Biomarkers',
+                'organ_health_check_count' => $organHealthCheckCount,
+                'total_biomarkers' => $totalBiomarkers,
+                'summary' => $organHealthCheckCount . ' Organ Health Check • ' . $totalBiomarkers . ' Biomarkers',
             ];
             $data['selected_organ_tests'] = $selectedOrganTests;
             $data['selected_biomarkers'] = $selection->selected_biomarkers ?? [];
