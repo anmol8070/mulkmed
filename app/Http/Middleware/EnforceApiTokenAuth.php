@@ -76,6 +76,8 @@ class EnforceApiTokenAuth
         'user/AIVitalsMisa',
         // Shenai Care
         'newshenai-care/downloadLatestLongevityReportPdf',
+        'newshenai-care/downloadBloodAgeReportV3',
+        'newshenai-care/longevityReportPdf',
         'newshenai-care/uploadLabReport',
         'newshenai-care/reviewAndBuy',
     ];

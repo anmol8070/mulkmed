@@ -1145,7 +1145,7 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
             ]);
         }
 
-        else if(($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanBeforePaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMesaBeforeChatPayment) || ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType)){
+        else if(($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanBeforePaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMesaBeforeChatPayment) || ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMajorOrganPaymentType)){
             $ai_vital_misa = AIVitalScanMisa::where('order_id', $responseData['order_id'])->first();
             if($ai_vital_misa){
                 if($status == 'Success'){
@@ -1467,6 +1467,8 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
             // Process and save selections
             $hasItemsToSave = !empty($longevityPlanIds) || !empty($packageIds) || !empty($planIds);
             $selectedPackageRecord = null;
+            $combinedPlanIdsString = null;
+            $longevityPlanIdsString = null;
 
             if ($hasItemsToSave) {
                 $combinedOrganTests = [];
@@ -1694,7 +1696,16 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
 
             $encrypted_data = Crypto::encrypt($merchant_data, env('CCAVENUE_WORKING_KEY'));
 
-            $payment_url = env('CCAVENUE_BASE_URL') . "=$encrypted_data&access_code=" . env('CCAVENUE_ACCESS_CODE');
+            // Bypass CCAvenue gateway — open success page directly
+            // $payment_url = env('CCAVENUE_BASE_URL') . "=$encrypted_data&access_code=" . env('CCAVENUE_ACCESS_CODE');
+            $merchantParam5 = ($actualReportFrom === 'major_organ') ? Constants::CCAvenueMajorOrganPaymentType : Constants::CCAvenueLongevityPaymentType;
+            $payment_url = url(
+                '/api/v1/user/ccavenue/successAIVitalScan'
+                . '?order_id=' . urlencode($order_id)
+                . '&merchant_param5=' . urlencode($merchantParam5)
+                . '&merchant_param4=' . urlencode((string) $merchantParam4)
+                . '&amount=' . urlencode(number_format($amount, 2, '.', ''))
+            );
 
             return response()->json([
                 'status' => true,

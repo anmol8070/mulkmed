@@ -478,6 +478,23 @@
             line-height: 1.55;
         }
 
+        .trigger-list li {
+            margin-bottom: 10px;
+        }
+
+        .mc-name {
+            font-weight: 700;
+            color: #0f1724;
+            margin-bottom: 2px;
+        }
+
+        .mc-detail {
+            color: #4b5563;
+            font-size: 11.5px;
+            line-height: 1.4;
+            padding-left: 2px;
+        }
+
         /* small responsive-like adjustments for printing */
         @media print {
             .title {
@@ -595,7 +612,7 @@
                 </div>
                 <div class="mid-col">
                     <div class="pill"><span
-                            style="display:inline-block;width:10px;height:10px;background:{{ getPillColor($report->heartRate ?? 0, 60, 100) }};border-radius:50%;margin-right:6px;"></span>{{ round($report->heartRate ?? 0) }}
+                            style="display:inline-block;width:10px;height:10px;background:{{ getPillColor(getMetricValue($report->heartRate ?? 0), 60, 100) }};border-radius:50%;margin-right:6px;"></span>{{ getMetricDisplay($report->heartRate ?? 0, 'round') }}
                     </div>
                 </div>
                 <div class="unit-col">bpm</div>
@@ -611,21 +628,32 @@
                         cardiovascular health (systolic/diastolic).</div>
                 </div>
                 <div class="mid-col">
-                    @php
+                                        @php
                        $systolic = 0;
                         $diastolic = 0;
+                        $bpDisplay = '- / -';
+                        $bpValStr = '';
 
-                        if (!empty($report?->bloodPressure) && str_contains($report->bloodPressure, '/')) {
-                            [$rawSystolic, $rawDiastolic] = explode('/', $report->bloodPressure);
+                        if (!empty($report?->bloodPressure)) {
+                            $bpValStr = getMetricDisplay($report->bloodPressure);
+                            
+                            // fallback for old format if it was simply string "120/80"
+                            if (str_contains($bpValStr, '/')) {
+                                [$rawSystolic, $rawDiastolic] = explode('/', $bpValStr);
 
-                            // Convert safely to integers
-                            $systolic = (int) filter_var($rawSystolic, FILTER_SANITIZE_NUMBER_INT);
-                            $diastolic = (int) filter_var($rawDiastolic, FILTER_SANITIZE_NUMBER_INT);
+                                // Convert safely to integers
+                                $systolic = (int) filter_var($rawSystolic, FILTER_SANITIZE_NUMBER_INT);
+                                $diastolic = (int) filter_var($rawDiastolic, FILTER_SANITIZE_NUMBER_INT);
 
-                            $sColor = getPillColor($systolic, 90, 120);
-                            $dColor = getPillColor($diastolic, 60, 70);
+                                $sColor = getPillColor($systolic, 90, 120);
+                                $dColor = getPillColor($diastolic, 60, 70);
 
-                            $bpColor = worstColor([$sColor, $dColor]);
+                                $bpColor = worstColor([$sColor, $dColor]);
+                                
+                                // If the original extracted result was already "111 / 74", it'll be preserved in $bpValStr
+                            } else {
+                                $bpColor = getPillColor(0, 0, 0); // safe default
+                            }
                         } else {
                             $bpColor = getPillColor(0, 0, 0); // safe default
                         }
@@ -634,7 +662,7 @@
                             style="display:inline-block;width:10px;height:10px;background:{{ $bpColor }};border-radius:50%;margin-right:6px;"></span>
 
 
-                        {{ round($systolic ?? 0) }} / {{ round($diastolic ?? 0) }}
+                        {{ $bpValStr }}
                     </div>
                 </div>
                 <div class="unit-col">mmHg</div>
@@ -651,7 +679,7 @@
                         </div>
                 <div class="mid-col">
                     <div class="pill"><span
-                            style="display:inline-block;width:10px;height:10px;background:#28a745;border-radius:50%;margin-right:6px;"></span>{{ round($report->hrvSdnnMs ?? 0) }}
+                            style="display:inline-block;width:10px;height:10px;background:#28a745;border-radius:50%;margin-right:6px;"></span>{{ getMetricDisplay($report->hrvSdnnMs ?? 0, 'round') }}
                     </div>
                 </div>
                 <div class="unit-col">ms</div>
@@ -668,7 +696,7 @@
                 </div>
                 <div class="mid-col">
                     <div class="pill"><span
-                            style="display:inline-block;width:10px;height:10px;background:{{getPillColor($report->respiratoryRate ?? 0, 12, 20)}};border-radius:50%;margin-right:6px;"></span>{{ round($report->respiratoryRate ?? 0) }}
+                            style="display:inline-block;width:10px;height:10px;background:{{getPillColor(getMetricValue($report->respiratoryRate ?? 0), 12, 20)}};border-radius:50%;margin-right:6px;"></span>{{ getMetricDisplay($report->respiratoryRate ?? 0, 'round') }}
                     </div>
                 </div>
                 <div class="unit-col">bpm</div>
@@ -685,7 +713,7 @@
                 </div>
                 <div class="mid-col">
                     <div class="pill"><span
-                            style="display:inline-block;width:10px;height:10px;background:{{getPillColor($report->stressLevel ?? 0, 0, max: 4)}};border-radius:50%;margin-right:6px;"></span>{{round($report->stressLevel ?? 0)}}
+                            style="display:inline-block;width:10px;height:10px;background:{{getPillColor(getMetricValue($report->stressLevel ?? 0), 0, 4)}};border-radius:50%;margin-right:6px;"></span>{{ getMetricDisplay($report->stressLevel ?? 0, 'round') }}
                     </div>
                 </div>
                 <div class="unit-col">-</div>
@@ -702,11 +730,11 @@
                 </div>
                 <div class="mid-col">
                     <div class="pill"><span
-                            style="display:inline-block;width:10px;height:10px;background:#28a745;border-radius:50%;margin-right:6px;"></span>{{round($report->parasympatheticActivity ?? 0)}}
+                            style="display:inline-block;width:10px;height:10px;background:#28a745;border-radius:50%;margin-right:6px;"></span>{{ getMetricDisplay($report->parasympatheticActivity ?? 0, 'round') }}
                     </div>
                 </div>
-                <div class="unit-col">%</div>
-                <div class="right-col">N/A*</div>
+                <div class="unit-col">{{ getMetricUnit($report->parasympatheticActivity ?? 0, '%') }}</div>
+                <div class="right-col">{{ getMetricRange($report->parasympatheticActivity ?? 0, 'N/A*') }}</div>
                 <div class="clear-row"></div>
             </div>
 
@@ -718,7 +746,7 @@
                 </div>
                 <div class="mid-col">
                     <div class="pill"><span
-                            style="display:inline-block;width:10px;height:10px;background:{{getPillColor($report->cardiacWorkload ?? 0, 90, 216)}};border-radius:50%;margin-right:6px;"></span>{{ round($report->cardiacWorkload ?? 0)}}
+                            style="display:inline-block;width:10px;height:10px;background:{{getPillColor(getMetricValue($report->cardiacWorkload ?? 0), 90, 216)}};border-radius:50%;margin-right:6px;"></span>{{ getMetricDisplay($report->cardiacWorkload ?? 0, 'round') }}
                     </div>
                 </div>
                 <div class="unit-col">a.u.</div>
@@ -735,7 +763,7 @@
                 </div>
                 <div class="mid-col">
                     <div class="pill"><span
-                            style="display:inline-block;width:10px;height:10px;background:{{getPillColor($report->bmi ?? 0, 18.5, 24.9)}};border-radius:50%;margin-right:6px;"></span>{{ round($report->bmi ?? 0)}}
+                            style="display:inline-block;width:10px;height:10px;background:{{getPillColor(getMetricValue($report->bmi ?? 0), 18.5, 24.9)}};border-radius:50%;margin-right:6px;"></span>{{ getMetricDisplay($report->bmi ?? 0, 'round') }}
                     </div>
                 </div>
                 <div class="unit-col">-</div>
@@ -805,7 +833,7 @@
                     </div>
 
                     <div class="right">
-                        <div class="result-box">{{ number_format($report->healthIndices?->wellnessScore ?? 0, 2) }}</div>
+                        <div class="result-box">{{ getMetricDisplay($report->healthIndices?->wellnessScore ?? 0, 'format2') }}</div>
                     </div>
                     <div class="clearfix"></div>
                 </div>
@@ -831,7 +859,7 @@
                             cardiovascular risk.</div>
                     </div>
                     <div class="right">
-                        <div class="result-box">{{ number_format($report->healthIndices?->vascularAge ?? 0, 2) }}</div>
+                        <div class="result-box">{{ getMetricDisplay($report->healthIndices?->vascularAge ?? 0, 'format2') }}</div>
                     </div>
                     <div class="clearfix"></div>
                 </div>
@@ -843,7 +871,7 @@
                             the next 10 years.</div>
                     </div>
                     <div class="right">
-                        <div class="result-box">{{ number_format($report->healthIndices?->cvDiseases?->overallRisk ?? 0, 2) }}</div>
+                        <div class="result-box">{{ getMetricDisplay($report->healthIndices?->cvDiseases?->overallRisk ?? 0, 'format2') }}</div>
                     </div>
                     <div class="clearfix"></div>
                 </div>
@@ -855,7 +883,7 @@
                             Framingham).</div>
                     </div>
                     <div class="right">
-                        <div class="result-box">{{ number_format($report->healthIndices?->totalCVMortalityRisk ?? 0, 2) }}</div>
+                        <div class="result-box">{{ getMetricDisplay($report->healthIndices?->totalCVMortalityRisk ?? 0, 'format2') }}</div>
                     </div>
                     <div class="clearfix"></div>
                 </div>
@@ -867,7 +895,7 @@
                             years.</div>
                     </div>
                     <div class="right">
-                        <div class="result-box">{{ number_format($report->healthIndices?->hardAndFatalEvents?->hardCVEventRisk ?? 0, 2) }}</div>
+                        <div class="result-box">{{ getMetricDisplay($report->healthIndices?->hardAndFatalEvents?->hardCVEventRisk ?? 0, 'format2') }}</div>
                     </div>
                     <div class="clearfix"></div>
                 </div>
@@ -938,7 +966,7 @@
                         <div class="result-box">
                             <div>
                                 @php
-                                    $hypertensionRisk = number_format($report->healthIndices?->hypertensionRisk ?? 0, 2);
+                                    $hypertensionRisk = getMetricDisplay($report->healthIndices?->hypertensionRisk ?? 0, 'format2');
                                 @endphp
 
                                 @if($hypertensionRisk < 5)
@@ -950,7 +978,7 @@
                                 @endif
                             </div>
                             <div>
-                            {{ number_format($report->healthIndices?->hypertensionRisk ?? 0, 2) }}%
+                            {{ getMetricDisplay($report->healthIndices?->hypertensionRisk ?? 0, 'format2') }}%
                             </div>
                             
                         </div>
@@ -968,7 +996,7 @@
                         <div class="result-box">
                             <div>
                                 @php
-                                    $diabetesRisk = number_format($report->healthIndices?->diabetesRisk ?? 0, 2);
+                                    $diabetesRisk = getMetricDisplay($report->healthIndices?->diabetesRisk ?? 0, 'format2');
                                 @endphp
 
                                 @if($diabetesRisk < 5)
@@ -980,7 +1008,7 @@
                                 @endif
                             </div>
                             <div>
-                            {{ number_format($report->healthIndices?->diabetesRisk ?? 0, 2)}}%
+                            {{ getMetricDisplay($report->healthIndices?->diabetesRisk ?? 0, 'format2')}}%
                             </div>
                         </div>
                     </div>
@@ -994,7 +1022,7 @@
                             unmanaged.</div>
                     </div>
                     <div class="right">
-                        <div class="result-box">{{ ucfirst($report->healthIndices?->nonAlcoholicFattyLiverDiseaseRisk ?? 0.00) }}</div>
+                        <div class="result-box">{{ ucfirst(getMetricDisplay($report->healthIndices?->nonAlcoholicFattyLiverDiseaseRisk ?? '0.00')) }}</div>
                     </div>
                     <div class="clearfix"></div>
                 </div>
@@ -1021,7 +1049,7 @@
                             height.</div>
                     </div>
                     <div class="right">
-                        <div class="result-box">{{ number_format($report->healthIndices?->waistToHeightRatio ?? 0, 2) }}<div
+                        <div class="result-box">{{ getMetricDisplay($report->healthIndices?->waistToHeightRatio ?? 0, 'format2') }}<div
                                 style="font-weight:600;color:#6b7280;font-size:11px;margin-top:6px">Normal 0 - 0.53
                             </div>
                         </div>
@@ -1035,7 +1063,7 @@
                         <div class="index-desc">Proportion of body fat relative to total body weight.</div>
                     </div>
                     <div class="right">
-                        <div class="result-box">{{ number_format($report->healthIndices?->bodyFatPercentage ?? 0, 2) }}<div
+                        <div class="result-box">{{ getMetricDisplay($report->healthIndices?->bodyFatPercentage ?? 0, 'format2') }}<div
                                 style="font-weight:600;color:#6b7280;font-size:11px;margin-top:6px">Normal 7 - 23%
                             </div>
                         </div>
@@ -1050,7 +1078,7 @@
                             circumference and height.</div>
                     </div>
                     <div class="right">
-                        <div class="result-box">{{ number_format($report->healthIndices?->bodyRoundnessIndex ?? 0, 2) }}<div
+                        <div class="result-box">{{ getMetricDisplay($report->healthIndices?->bodyRoundnessIndex ?? 0, 'format2') }}<div
                                 style="font-weight:600;color:#6b7280;font-size:11px;margin-top:6px">Normal 0 - 3.85
                             </div>
                         </div>
@@ -1065,7 +1093,7 @@
                             estimate risks.</div>
                     </div>
                     <div class="right">
-                        <div class="result-box">{{ number_format($report->healthIndices?->aBodyShapeIndex ?? 0, 2) }}<div
+                        <div class="result-box">{{ getMetricDisplay($report->healthIndices?->aBodyShapeIndex ?? 0, 'format2') }}<div
                                 style="font-weight:600;color:#6b7280;font-size:11px;margin-top:6px">Normal 0 - 0.083
                             </div>
                         </div>
@@ -1080,7 +1108,7 @@
                         </div>
                     </div>
                     <div class="right">
-                        <div class="result-box">{{ number_format($report->healthIndices?->conicityIndex ?? 0, 2) }}<div
+                        <div class="result-box">{{ getMetricDisplay($report->healthIndices?->conicityIndex ?? 0, 'format2') }}<div
                                 style="font-weight:600;color:#6b7280;font-size:11px;margin-top:6px">Normal 0 - 1.275
                             </div>
                         </div>
@@ -1094,7 +1122,7 @@
                         <div class="index-desc">Calories your body needs at rest for essential functions.</div>
                     </div>
                     <div class="right">
-                        <div class="result-box">{{ number_format($report->healthIndices?->basalMetabolicRate ?? 0, 2) }}</div>
+                        <div class="result-box">{{ getMetricDisplay($report->healthIndices?->basalMetabolicRate ?? 0, 'format2') }}</div>
                     </div>
                     <div class="clearfix"></div>
                 </div>
@@ -1106,7 +1134,7 @@
                             functions.</div>
                     </div>
                     <div class="right">
-                        <div class="result-box">{{ number_format($report->healthIndices?->totalDailyEnergyExpenditure ?? 0, 2) }}</div>
+                        <div class="result-box">{{ getMetricDisplay($report->healthIndices?->totalDailyEnergyExpenditure ?? 0, 'format2') }}</div>
                     </div>
                     <div class="clearfix"></div>
                 </div>
@@ -1137,12 +1165,24 @@
 
     <!-- PAGE 4 — Summary & Triggers -->
     @php
+        // Normalize possible array/string payloads so object access is safe
+        if (empty($shen_ai) || is_string($shen_ai)) {
+            $shen_ai = is_string($shen_ai) && $shen_ai !== '' ? (json_decode($shen_ai) ?: new \stdClass()) : new \stdClass();
+        } elseif (is_array($shen_ai)) {
+            $shen_ai = json_decode(json_encode($shen_ai));
+        }
+        if (empty($report) || is_string($report)) {
+            $report = is_string($report) && $report !== '' ? (json_decode($report) ?: new \stdClass()) : new \stdClass();
+        } elseif (is_array($report)) {
+            $report = json_decode(json_encode($report));
+        }
+
         // Try to get from shen_ai first, fallback to report
-        $wellnessScore = (float) ($shen_ai->healthIndices->wellnessScore ?? $shen_ai->wellnessScore ?? $report->healthIndices?->wellnessScore ?? 0);
-        $hrvValue = (float) ($shen_ai->hrvSdnnMs ?? $shen_ai->hrv_sdnn_ms ?? $report->hrvSdnnMs ?? 0);
-        $bmiValue = (float) ($shen_ai->bmi ?? $report->bmi ?? 0);
-        $bmrValue = (float) ($shen_ai->healthIndices->basalMetabolicRate ?? $shen_ai->basalMetabolicRate ?? $report->healthIndices?->basalMetabolicRate ?? 0);
-        $tdeeValue = (float) ($shen_ai->healthIndices->totalDailyEnergyExpenditure ?? $shen_ai->totalDailyEnergyExpenditure ?? $report->healthIndices?->totalDailyEnergyExpenditure ?? 0);
+        $wellnessScore = getMetricValue($shen_ai->healthIndices->wellnessScore ?? $shen_ai->wellnessScore ?? $report->healthIndices?->wellnessScore ?? 0);
+        $hrvValue = getMetricValue($shen_ai->hrvSdnnMs ?? $shen_ai->hrv_sdnn_ms ?? $report->hrvSdnnMs ?? 0);
+        $bmiValue = getMetricValue($shen_ai->bmi ?? $report->bmi ?? 0);
+        $bmrValue = getMetricValue($shen_ai->healthIndices->basalMetabolicRate ?? $shen_ai->basalMetabolicRate ?? $report->healthIndices?->basalMetabolicRate ?? 0);
+        $tdeeValue = getMetricValue($shen_ai->healthIndices->totalDailyEnergyExpenditure ?? $shen_ai->totalDailyEnergyExpenditure ?? $report->healthIndices?->totalDailyEnergyExpenditure ?? 0);
 
         $pctDev = function ($value, $target) {
             if (empty($target) || $target == 0) {
@@ -1227,12 +1267,7 @@
     </div>
     <div class="page">
 
-        <div class="p4-patient">
-            <div class="meta">Name : {{ $user->fullname ?? '' }}</div>
-            <div class="meta">DOB : {{ !empty($user->dob) ? \Carbon\Carbon::parse($user->dob)->format('d-m-Y') : '' }}</div>
-            <div class="meta">Age : {{ !empty($user->dob) ? \Carbon\Carbon::parse($user->dob)->age : '' }}</div>
-            <div class="meta">Scan Date : {{ !empty($scan_date) ? \Carbon\Carbon::parse($scan_date)->format('d/m/Y, H:i:s') : '' }}</div>
-        </div>
+
 
         <div class="p4-table-head-wrap">
             <table class="p4-table">
@@ -1270,42 +1305,337 @@
         </div>
 
         @php
-            $pdfClinicalTriggers = [];
-            $sData = isset($senoclock_ai_response) ? (is_string($senoclock_ai_response) ? json_decode($senoclock_ai_response, true) : (array)$senoclock_ai_response) : [];
-            $triggersSource = $sData['data']['trigger'] ?? $sData['trigger'] ?? [];
-            
-            if (!empty($triggersSource) && is_array($triggersSource)) {
-                foreach ($triggersSource as $trig) {
-                    $matchedConditions = [];
-                    if (isset($trig['matched_conditions']) && is_array($trig['matched_conditions'])) {
-                        foreach ($trig['matched_conditions'] as $mc) {
-                            $pName = $mc['parameter_name'] ?? '';
-                            $pMatchedCondition = $mc['matched_condition'] ?? '';
-                            $matchedConditions[] = trim($pName . ' ' . $pMatchedCondition);
+            /**
+             * Clean matched-condition lines for PDF (never show raw JSON).
+             * Handles: arrays, JSON strings, and "Label {json}" leftovers.
+             */
+            $cleanMatchedLine = function ($mc) use (&$cleanMatchedLine) {
+                if (is_object($mc)) {
+                    $mc = json_decode(json_encode($mc), true) ?: [];
+                }
+
+                $compose = function ($label, $result, $unit, $range) {
+                    $label = trim((string) $label);
+                    $unit = trim((string) $unit);
+                    $range = trim((string) $range);
+                    $parts = [];
+                    if ($label !== '') {
+                        $parts[] = $label;
+                    }
+                    if ($result !== null && $result !== '') {
+                        $value = trim((string) $result);
+                        if ($unit !== '' && !in_array(strtolower($unit), ['n/a', '-', '/', '/ '], true)) {
+                            $value .= ' ' . $unit;
+                        }
+                        $parts[] = $value;
+                    }
+                    if ($range !== '' && strtolower($range) !== 'n/a') {
+                        $parts[] = '(' . $range . ')';
+                    }
+                    return trim(implode(' ', $parts));
+                };
+
+                $decodeJson = function ($value) {
+                    if (!is_string($value)) {
+                        return $value;
+                    }
+                    $current = trim($value);
+                    for ($i = 0; $i < 3; $i++) {
+                        if ($current === '' || ($current[0] !== '{' && $current[0] !== '[')) {
+                            return $current;
+                        }
+                        $decoded = json_decode($current, true);
+                        if (json_last_error() !== JSON_ERROR_NONE) {
+                            return $current;
+                        }
+                        if (is_array($decoded)) {
+                            return $decoded;
+                        }
+                        if (is_string($decoded)) {
+                            $current = trim($decoded);
+                            continue;
+                        }
+                        return $current;
+                    }
+                    return $current;
+                };
+
+                if (is_string($mc)) {
+                    $text = trim($mc);
+                    if ($text === '') {
+                        return '';
+                    }
+
+                    // Exact leftover format from screenshot: Label {"name":"...","result":"..."}
+                    if (preg_match('/^(.*?)\s*(\{[\\s\\S]*\})$/', $text, $m)) {
+                        $decoded = $decodeJson($m[2]);
+                        if (is_array($decoded)) {
+                            $label = trim($m[1]);
+                            if ($label === '' && !empty($decoded['name'])) {
+                                $label = ucwords((string) $decoded['name']);
+                            }
+                            return $compose(
+                                $label,
+                                $decoded['result'] ?? $decoded['value'] ?? null,
+                                $decoded['unit'] ?? '',
+                                $decoded['normal_range'] ?? ''
+                            );
                         }
                     }
-                    
-                    $cat = strtolower($trig['trigger_category'] ?? '');
-                    $icon = 'wellness.png';
-                    if (str_contains($cat, 'metabolic') || str_contains($cat, 'insulin')) {
-                        $icon = 'insulin.png';
-                    } elseif (str_contains($cat, 'respiratory')) {
-                        $icon = 'respiratory.png';
+
+                    $decoded = $decodeJson($text);
+                    if (is_array($decoded)) {
+                        return $cleanMatchedLine($decoded);
                     }
-        
-                    $pdfClinicalTriggers[] = [
-                        'title' => $trig['trigger_name'] ?? 'Trigger',
-                        'description' => $trig['trigger_description'] ?? '',
-                        'matched_conditions' => $matchedConditions,
-                        'icon' => $icon
-                    ];
+
+                    // Strip any leftover JSON object text
+                    $text = preg_replace('/\{[^{}]*"(?:name|result|unit|normal_range)"[^{}]*\}/', '', $text);
+                    return trim((string) $text);
+                }
+
+                if (!is_array($mc)) {
+                    return '';
+                }
+
+                // Metric object directly
+                if (!isset($mc['matched_condition']) && (isset($mc['result']) || isset($mc['value']))) {
+                    return $compose(
+                        $mc['parameter_name'] ?? $mc['name'] ?? '',
+                        $mc['result'] ?? $mc['value'] ?? null,
+                        $mc['unit'] ?? '',
+                        $mc['normal_range'] ?? ''
+                    );
+                }
+
+                $paramName = trim((string) ($mc['parameter_name'] ?? ''));
+                $condition = $mc['matched_condition'] ?? null;
+                if (is_object($condition)) {
+                    $condition = json_decode(json_encode($condition), true);
+                }
+                if (is_string($condition)) {
+                    $condition = $decodeJson($condition);
+                }
+
+                if (is_array($condition)) {
+                    if ($paramName === '' && !empty($condition['name'])) {
+                        $paramName = ucwords((string) $condition['name']);
+                    }
+                    return $compose(
+                        $paramName,
+                        $condition['result'] ?? $condition['value'] ?? null,
+                        $condition['unit'] ?? '',
+                        $condition['normal_range'] ?? ''
+                    );
+                }
+
+                $condText = is_scalar($condition) ? trim((string) $condition) : '';
+                if ($paramName !== '' && $condText !== '') {
+                    return $cleanMatchedLine(trim($paramName . ' ' . $condText));
+                }
+                return $paramName !== '' ? $paramName : $cleanMatchedLine($condText);
+            };
+
+            $pdfClinicalTriggers = [];
+            $sourceTriggers = [];
+
+            if (!empty($clinicalTriggers) && is_array($clinicalTriggers)) {
+                $sourceTriggers = $clinicalTriggers;
+            } else {
+                $toArray = function ($value) {
+                    if (empty($value)) {
+                        return [];
+                    }
+                    if (is_string($value)) {
+                        $decoded = json_decode($value, true);
+                        return is_array($decoded) ? $decoded : [];
+                    }
+                    if (is_object($value)) {
+                        return json_decode(json_encode($value), true) ?: [];
+                    }
+                    return is_array($value) ? $value : [];
+                };
+
+                $sData = $toArray($senoclock_ai_response ?? null);
+                $shenData = $toArray($shen_ai ?? null);
+                $reportArr = $toArray($report ?? null);
+
+                foreach ([
+                    $sData['data']['trigger'] ?? null,
+                    $sData['trigger'] ?? null,
+                    $sData['data']['triggers'] ?? null,
+                    $sData['triggers'] ?? null,
+                    $shenData['data']['trigger'] ?? null,
+                    $shenData['trigger'] ?? null,
+                    $shenData['triggers'] ?? null,
+                    $reportArr['trigger'] ?? null,
+                ] as $candidate) {
+                    if (!empty($candidate) && is_array($candidate)) {
+                        $sourceTriggers = $candidate;
+                        break;
+                    }
                 }
             }
+
+            foreach ($sourceTriggers as $trigger) {
+                if (!is_array($trigger)) {
+                    continue;
+                }
+
+                $icon = $trigger['icon'] ?? 'wellness.png';
+                $icon = basename(str_replace('\\', '/', (string) $icon));
+                if ($icon === '' || $icon === 'uploads') {
+                    $icon = 'wellness.png';
+                }
+
+                $rawConditions = $trigger['matched_conditions'] ?? [];
+                // Raw senoclock trigger shape
+                if (empty($rawConditions) && isset($trigger['trigger_name'])) {
+                    // keep empty; title/description come from trigger fields below
+                }
+
+                $cleanConditions = [];
+                if (is_array($rawConditions)) {
+                    foreach ($rawConditions as $mc) {
+                        // Prefer structured fields from controller; otherwise parse raw object/JSON/string
+                        $normalized = null;
+                        if (is_array($mc) && isset($mc['name']) && array_key_exists('result', $mc) && array_key_exists('unit', $mc) && array_key_exists('normal_range', $mc) && !isset($mc['matched_condition'])) {
+                            $normalized = $mc;
+                        } else {
+                            // Reuse string cleaner output only as a last-resort label source; parse fields below
+                            $raw = $mc;
+                        }
+
+                        if ($normalized === null) {
+                            if (is_object($mc)) {
+                                $mc = json_decode(json_encode($mc), true) ?: [];
+                            }
+
+                            $fallbackName = '';
+                            $payload = null;
+
+                            if (is_string($mc)) {
+                                $trimmed = trim($mc);
+                                if (preg_match('/^(.*?)\s*(\{[\s\S]*\})$/u', $trimmed, $mm)) {
+                                    $fallbackName = trim($mm[1]);
+                                    $obj = trim($mm[2]);
+                                } else {
+                                    $obj = $trimmed;
+                                }
+                                $decoded = json_decode($obj, true);
+                                if (!is_array($decoded) && str_starts_with($obj, '{') && str_contains($obj, "'")) {
+                                    $decoded = json_decode(preg_replace('/(?<!\\\\)\'/', '"', $obj), true);
+                                }
+                                if (!is_array($decoded) && str_starts_with($obj, '{')) {
+                                    $decoded = [];
+                                    foreach (['name', 'parameter_name', 'result', 'value', 'unit', 'normal_range', 'range'] as $key) {
+                                        if (preg_match('/[\'"]' . preg_quote($key, '/') . '[\'"]\s*:\s*[\'"]([^\'"]*)[\'"]/u', $obj, $km)) {
+                                            $decoded[$key] = $km[1];
+                                        }
+                                    }
+                                    if (empty($decoded)) {
+                                        $decoded = null;
+                                    }
+                                }
+                                $payload = is_array($decoded) ? $decoded : null;
+                            } elseif (is_array($mc)) {
+                                $fallbackName = trim((string) ($mc['parameter_name'] ?? $mc['name'] ?? ''));
+                                $condition = $mc['matched_condition'] ?? null;
+                                if (is_object($condition)) {
+                                    $condition = json_decode(json_encode($condition), true);
+                                }
+                                if (is_string($condition)) {
+                                    $condTrim = trim($condition);
+                                    if (preg_match('/^(.*?)\s*(\{[\s\S]*\})$/u', $condTrim, $mm)) {
+                                        if ($fallbackName === '') {
+                                            $fallbackName = trim($mm[1]);
+                                        }
+                                        $condTrim = trim($mm[2]);
+                                    }
+                                    $decoded = json_decode($condTrim, true);
+                                    if (!is_array($decoded) && str_starts_with($condTrim, '{') && str_contains($condTrim, "'")) {
+                                        $decoded = json_decode(preg_replace('/(?<!\\\\)\'/', '"', $condTrim), true);
+                                    }
+                                    if (!is_array($decoded) && str_starts_with($condTrim, '{')) {
+                                        $decoded = [];
+                                        foreach (['name', 'parameter_name', 'result', 'value', 'unit', 'normal_range', 'range'] as $key) {
+                                            if (preg_match('/[\'"]' . preg_quote($key, '/') . '[\'"]\s*:\s*[\'"]([^\'"]*)[\'"]/u', $condTrim, $km)) {
+                                                $decoded[$key] = $km[1];
+                                            }
+                                        }
+                                        if (empty($decoded)) {
+                                            $decoded = null;
+                                        }
+                                    }
+                                    $payload = is_array($decoded) ? $decoded : null;
+                                } elseif (is_array($condition)) {
+                                    $payload = $condition;
+                                } else {
+                                    $payload = $mc;
+                                }
+                            }
+
+                            if (!is_array($payload)) {
+                                continue;
+                            }
+
+                            $name = trim((string) ($fallbackName !== '' ? $fallbackName : ($payload['parameter_name'] ?? $payload['name'] ?? '')));
+                            if ($name === '') {
+                                $name = 'Parameter';
+                            }
+
+                            $dash = function ($v) {
+                                if ($v === null) {
+                                    return '—';
+                                }
+                                $t = trim((string) $v);
+                                return ($t === '' || $t === '-' || $t === '/' || strtolower($t) === 'n/a' || strtolower($t) === 'null') ? '—' : $t;
+                            };
+
+                            $normalized = [
+                                'name' => $name,
+                                'result' => $dash($payload['result'] ?? $payload['value'] ?? null),
+                                'unit' => $dash($payload['unit'] ?? null),
+                                'normal_range' => $dash($payload['normal_range'] ?? $payload['range'] ?? null),
+                            ];
+                        } else {
+                            $dash = function ($v) {
+                                if ($v === null) {
+                                    return '—';
+                                }
+                                $t = trim((string) $v);
+                                return ($t === '' || $t === '-' || $t === '/' || strtolower($t) === 'n/a' || strtolower($t) === 'null') ? '—' : $t;
+                            };
+                            $normalized = [
+                                'name' => trim((string) ($normalized['name'] ?? 'Parameter')) ?: 'Parameter',
+                                'result' => $dash($normalized['result'] ?? null),
+                                'unit' => $dash($normalized['unit'] ?? null),
+                                'normal_range' => $dash($normalized['normal_range'] ?? null),
+                            ];
+                        }
+
+                        $blob = $normalized['name'] . $normalized['result'] . $normalized['unit'] . $normalized['normal_range'];
+                        if (str_contains($blob, '{') || str_contains($blob, "'name'") || str_contains($blob, '"name"')) {
+                            continue;
+                        }
+                        $cleanConditions[] = $normalized;
+                    }
+                }
+
+                $pdfClinicalTriggers[] = [
+                    'title' => $trigger['title'] ?? $trigger['trigger_name'] ?? 'Trigger',
+                    'description' => $trigger['description'] ?? $trigger['trigger_description'] ?? '',
+                    'matched_conditions' => $cleanConditions,
+                    'icon' => $icon,
+                ];
+            }
+
+            $pdfClinicalTriggers = array_slice($pdfClinicalTriggers, 0, 5);
         @endphp
 
+        @if(count($pdfClinicalTriggers) > 0)
         <div class="trigger-wrap">
             @foreach($pdfClinicalTriggers as $index => $trigger)
-            <div class="trigger-card {{ $index % 2 != 0 ? 'right' : '' }}">
+            <div class="trigger-card {{ $index % 2 != 0 ? 'right' : '' }}" style="page-break-inside: avoid; break-inside: avoid;">
                 <div class="trigger-title">
                     <img src="{{ asset('/storage/uploads/' . $trigger['icon']) }}" alt="" />
                     {{ $trigger['title'] }}
@@ -1316,7 +1646,31 @@
                 <div class="trigger-matched">Matched Conditions</div>
                 <ul class="trigger-list">
                     @foreach($trigger['matched_conditions'] as $mc)
-                        <li>{{ $mc }}</li>
+                        <li>
+                            <div class="mc-name">{{ is_array($mc) ? ($mc['name'] ?? 'Parameter') : $mc }}</div>
+                            @if(is_array($mc))
+                                @php
+                                    $mcResult = trim((string) ($mc['result'] ?? ''));
+                                    if ($mcResult === '' || strtolower($mcResult) === 'n/a' || $mcResult === 'null') {
+                                        $mcResult = '—';
+                                    }
+                                    $mcUnit = trim((string) ($mc['unit'] ?? ''));
+                                    $mcUnitUsable = $mcUnit !== ''
+                                        && $mcUnit !== '—'
+                                        && $mcUnit !== '-'
+                                        && $mcUnit !== '/'
+                                        && strtolower($mcUnit) !== 'n/a'
+                                        && strtolower($mcUnit) !== 'null';
+                                    $mcResultLine = $mcUnitUsable ? ($mcResult . ' ' . $mcUnit) : $mcResult;
+                                    $mcRange = trim((string) ($mc['normal_range'] ?? ''));
+                                    if ($mcRange === '' || strtolower($mcRange) === 'n/a' || $mcRange === 'null') {
+                                        $mcRange = '—';
+                                    }
+                                @endphp
+                                <div class="mc-detail">Result: {{ $mcResultLine }}</div>
+                                <div class="mc-detail">Normal Range: {{ $mcRange }}</div>
+                            @endif
+                        </li>
                     @endforeach
                 </ul>
             </div>
@@ -1328,6 +1682,7 @@
                 <div class="clearfix"></div>
             @endif
         </div>
+        @endif
 
         <div class="disclaimer" style="margin-top:22px">
             This report is intended for informational purposes only and does not constitute medical advice. It is not a substitute for professional medical judgment, diagnosis, or treatment. Always consult with a qualified healthcare professional regarding any medical concerns or decisions.

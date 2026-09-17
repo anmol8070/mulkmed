@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 class SenoclockAiService
 {
@@ -56,6 +57,16 @@ class SenoclockAiService
 
             $payload = $this->buildClassificationPayload($request ?? new Request(), $age, $sex, $aiVital);
             $payload = $this->normalizeClassificationPayload($payload);
+
+            // Debug body logging (commented out)
+            // $this->logExactTriggerClassificationBody($payload, [
+            //     'source' => 'processAiVital',
+            //     'ai_vital_id' => $aiVital->id,
+            //     'user_id' => $aiVital->user_id,
+            //     'age' => $age,
+            //     'sex' => $sex,
+            // ]);
+
             $responseBody = $this->triggerClassification($accessToken, $payload, $email, $password);
             
             if ($responseBody === null || isset($responseBody['error'])) {
@@ -185,30 +196,30 @@ class SenoclockAiService
             ];
         }
 
-        $url = $classificationUrl;
+        // Debug body logging (commented out)
+        // $this->logExactTriggerClassificationBody($payload, [
+        //     'source' => 'testClassification',
+        // ]);
 
-        $response = Http::timeout(60)
-            ->acceptJson()
-            ->asJson()
-            ->withToken($accessToken)
-            ->post($url, $payload);
+        $responseBody = $this->triggerClassification($accessToken, $payload, $email, $password);
 
-        if (!$response->successful()) {
+        if ($responseBody === null || isset($responseBody['error'])) {
             return [
                 'success' => false,
                 'message' => 'Classification request failed.',
-                'status' => $response->status(),
-                'body' => $response->json() ?? $response->body(),
+                'status' => $responseBody['status'] ?? 500,
+                'body' => $responseBody['message'] ?? $responseBody,
                 'payload' => $payload,
-                'api_url' => $url,
+                'api_url' => $classificationUrl,
             ];
         }
 
         return [
             'success' => true,
             'message' => 'Classification completed successfully.',
-            'data' => $response->json() ?? [],
-            'api_url' => $url,
+            'data' => $responseBody,
+            'api_url' => $classificationUrl,
+            'request_body' => $payload,
         ];
     }
 
@@ -363,11 +374,28 @@ class SenoclockAiService
     {
         $url = $this->apiUrl('/dl-api/mulkmed/trigger-classification/');
 
+        // Debug exact body logging (commented out)
+        // $bodyJson = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        // Log::info('===== SENO CLOCK TRIGGER-CLASSIFICATION EXACT REQUEST BODY START =====');
+        // Log::info('URL: ' . $url);
+        // Log::info('METHOD: POST');
+        // Log::info('Authorization: Bearer ' . substr($accessToken, 0, 12) . '...(redacted)');
+        // Log::info($bodyJson !== false ? $bodyJson : '{}');
+        // Log::info('===== SENO CLOCK TRIGGER-CLASSIFICATION EXACT REQUEST BODY END =====');
+        // $this->writeExactBodyToFile($payload, $url, $isRetry);
+
         $response = Http::timeout(60)
             ->acceptJson()
             ->asJson()
             ->withToken($accessToken)
             ->post($url, $payload);
+
+        // Debug response logging (commented out)
+        // $responseJson = json_encode($response->json() ?? $response->body(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        // Log::info('===== SENO CLOCK TRIGGER-CLASSIFICATION RESPONSE START =====');
+        // Log::info('STATUS: ' . $response->status());
+        // Log::info($responseJson !== false ? $responseJson : $response->body());
+        // Log::info('===== SENO CLOCK TRIGGER-CLASSIFICATION RESPONSE END =====');
 
         if ($response->status() === 401 && !$isRetry && !empty($email) && !empty($password)) {
             Log::info('Senoclock AI token expired, auto-refreshing token and retrying...');
@@ -381,12 +409,65 @@ class SenoclockAiService
             Log::error('Senoclock AI classification failed', [
                 'status' => $response->status(),
                 'body' => $response->body(),
-                'payload' => $payload,
             ]);
             return ['error' => true, 'status' => $response->status(), 'message' => $response->body()];
         }
 
         return $response->json() ?? [];
+    }
+
+    /**
+     * Log exact JSON body sent to Senoclock trigger-classification.
+     * (Debug helper — currently unused / commented out at call sites)
+     */
+    private function logExactTriggerClassificationBody(array $payload, array $meta = []): void
+    {
+        // $bodyJson = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        // Log::info('===== SENO CLOCK PREPARED BODY (before HTTP) START =====');
+        // Log::info('meta: ' . json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        // Log::info('api_url: ' . $this->getClassificationApiUrl());
+        // Log::info($bodyJson !== false ? $bodyJson : '{}');
+        // Log::info('===== SENO CLOCK PREPARED BODY (before HTTP) END =====');
+    }
+
+    /**
+     * Always write the exact request body to a dedicated file for easy inspection.
+     * (Debug helper — currently unused / commented out at call sites)
+     */
+    private function writeExactBodyToFile(array $payload, string $url, bool $isRetry = false): void
+    {
+        // try {
+        //     $dir = storage_path('logs');
+        //     if (!is_dir($dir)) {
+        //         @mkdir($dir, 0777, true);
+        //     }
+        //
+        //     $stamp = date('Y-m-d_H-i-s');
+        //     $filePath = $dir . DIRECTORY_SEPARATOR . 'senoclock_trigger_classification_body.json';
+        //     $historyPath = $dir . DIRECTORY_SEPARATOR . "senoclock_trigger_body_{$stamp}.json";
+        //
+        //     $content = json_encode([
+        //         'logged_at' => date('c'),
+        //         'url' => $url,
+        //         'method' => 'POST',
+        //         'is_retry' => $isRetry,
+        //         'body' => $payload,
+        //     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        //
+        //     if ($content === false) {
+        //         $content = '{}';
+        //     }
+        //
+        //     file_put_contents($filePath, $content);
+        //     file_put_contents($historyPath, $content);
+        //
+        //     Log::info('Senoclock exact request body saved to file', [
+        //         'latest_file' => $filePath,
+        //         'history_file' => $historyPath,
+        //     ]);
+        // } catch (\Throwable $e) {
+        //     Log::warning('Failed to write Senoclock request body file: ' . $e->getMessage());
+        // }
     }
 
     private function buildClassificationPayload(Request $request, int $age, string $sex, ?AI_Vital $aiVital = null): array

@@ -27,6 +27,11 @@ use Illuminate\Database\Schema\Blueprint;
 use PDF;
 use App\Helpers\CurrencyHelper;
 use Illuminate\Support\Str;
+use Mpdf\Config\ConfigVariables;
+use Mpdf\Config\FontVariables;
+use Mpdf\HTMLParserMode;
+use Mpdf\Mpdf;
+use Mpdf\Output\Destination;
 
 class NewShenaiCareController extends Controller
 {
@@ -71,98 +76,16 @@ class NewShenaiCareController extends Controller
         $senoclockData = is_string($vital->senoclock_ai_response) ? json_decode($vital->senoclock_ai_response, true) : (array) $vital->senoclock_ai_response;
         $shenAiData = is_string($vital->shen_ai) ? json_decode($vital->shen_ai, true) : (array) $vital->shen_ai;
 
-        $mergedData = array_merge(
+        $sections = $this->buildLongevityPriorityAndTriggers(
             is_array($reportData) ? $reportData : [],
             is_array($senoclockData) ? $senoclockData : [],
             is_array($shenAiData) ? $shenAiData : []
         );
-
-        if (isset($mergedData['healthIndices']) && is_array($mergedData['healthIndices'])) {
-            $mergedData = array_merge($mergedData, $mergedData['healthIndices']);
-        }
-
-        $priorityParameters = [];
-        if (isset($shenAiData['ranked_parameters']) && is_array($shenAiData['ranked_parameters'])) {
-            $rankedParams = $shenAiData['ranked_parameters'];
-            usort($rankedParams, function ($a, $b) {
-                return ($a['rank'] ?? 999) <=> ($b['rank'] ?? 999);
-            });
-
-            foreach ($rankedParams as $param) {
-                $rawName = $param['parameter_name'] ?? 'Unknown';
-                $resolved = $this->resolveParameterDetails($rawName, $param['input_value'] ?? null, $mergedData);
-
-                $unit = '-';
-                if (!empty($param['optimal_threshold'])) {
-                    if (preg_match('/([a-zA-Z%\/²³]+)$/', trim($param['optimal_threshold']), $matches)) {
-                        $unit = trim($matches[0]);
-                    }
-                }
-                
-                $statusStr = $param['status'] ?? 'Normal';
-                $statusLower = strtolower($statusStr);
-                $statusColor = 'success';
-                if ($statusLower === 'high' || $statusLower === 'low') $statusColor = 'danger';
-                elseif ($statusLower === 'needs attention') $statusColor = 'warning';
-                
-                $pct = isset($param['percentage_out_of_range']) ? $param['percentage_out_of_range'] : null;
-                $pctStr = '-';
-                if ($pct !== null) {
-                    $pctStr = ($pct > 0 ? '+' : '') . $pct . '%';
-                }
-
-                $priorityParameters[] = [
-                    'name' => $resolved['name'],
-                    'key' => $resolved['key'],
-                    'value' => $resolved['value'],
-                    'unit' => $unit,
-                    'percentage_deviation' => $pctStr,
-                    'status' => ucfirst($statusStr),
-                    'status_color' => $statusColor,
-                ];
-            }
-        } else {
-            $priorityParameters = $this->formatPriorityParameters($mergedData);
-        }
+        $priorityParameters = $sections['priority_parameters'];
+        $clinicalTriggers = $sections['clinical_triggers'];
 
         $baseUrl = url('/');
         $pdfUrl = $baseUrl . '/api/v1/newshenai-care/longevityReportPdf?user_id=' . $vital->user_id . '&report_id=' . $vital->id;
-
-        $clinicalTriggers = [];
-        $triggersSource = $senoclockData['data']['trigger'] ?? $senoclockData['trigger'] ?? [];
-        if (!empty($triggersSource) && is_array($triggersSource)) {
-            $triggerId = 1;
-            foreach ($triggersSource as $trig) {
-                if (!$this->isTriggerRelatedToPriorityParameters($trig, $priorityParameters)) {
-                    continue;
-                }
-
-                $matchedConditions = [];
-                if (isset($trig['matched_conditions']) && is_array($trig['matched_conditions'])) {
-                    foreach ($trig['matched_conditions'] as $mc) {
-                        $pName = $mc['parameter_name'] ?? '';
-                        $pMatchedCondition = $mc['matched_condition'] ?? '';
-                        $matchedConditions[] = trim($pName . ' ' . $pMatchedCondition);
-                    }
-                }
-                
-                $cat = strtolower($trig['trigger_category'] ?? '');
-                $icon = 'uploads/wellness.png';
-
-                $clinicalTriggers[] = [
-                    'id' => $triggerId++,
-                    'title' => $trig['trigger_name'] ?? 'Trigger',
-                    'description' => $trig['trigger_description'] ?? '',
-                    'matched_conditions' => $matchedConditions,
-                    'associated_organ_health' => $trig['associated_organ_health'] ?? '',
-                    'icon' => $icon
-                ];
-
-                if (count($clinicalTriggers) >= 5) {
-                    break;
-                }
-            }
-        }
 
         $longevityDoctors = $this->getMulkLongevityDoctors();
 
@@ -232,16 +155,16 @@ class NewShenaiCareController extends Controller
             'title' => 'Mulk Longevity Report',
             'priority_parameters' => [
                 'title' => 'Priority Parameters',
-'section_type' => 'priority_parameters',
+                'section_type' => 'priority_parameters',
                 'parameters' => $priorityParameters,
-],
+            ],
             'clinical_triggers' => [
                 'title' => 'Clinical Triggers',
                 'section_type' => 'clinical_triggers',
                 'triggers' => $clinicalTriggers,
-],
+            ],
             'report_links' => [
-'title' => 'Download your AI Wellness Report',
+                'title' => 'Download your AI Wellness Report',
                 'section_type' => 'report_links',
                 'download_pdf' => $pdfUrl,
                 'share_link' => $pdfUrl
@@ -255,7 +178,7 @@ class NewShenaiCareController extends Controller
                 'title' => 'Recommended Organ Health and Mulk Longevity Panel',
                 'section_type' => 'recommended_organ_health',
                 'package' => $packageData,
-                            'tests' => $majorOrganTests,
+                'tests' => $majorOrganTests,
             ],
             'longevity_plans' => [
                 'title' => 'Mulk Wellness Retreats and Longevity Plans',
@@ -531,8 +454,17 @@ Rules:
             // Trigger Senoclock AI classification to generate clinical triggers
             try {
                 $user = Users::find($aiVital->user_id);
+                // Log::info('[uploadAiVitalReport] calling Senoclock processAiVital → trigger-classification', [
+                //     'ai_vital_id' => $aiVital->id,
+                //     'user_id' => $aiVital->user_id,
+                //     'classification_url' => $this->senoclockAiService->getClassificationApiUrl(),
+                // ]);
                 $this->senoclockAiService->processAiVital($aiVital, $user, $request);
                 $aiVital->refresh();
+                // Log::info('[uploadAiVitalReport] Senoclock processAiVital finished', [
+                //     'ai_vital_id' => $aiVital->id,
+                //     'senoclock_ai_response' => $aiVital->senoclock_ai_response,
+                // ]);
             } catch (\Throwable $e) {
                 Log::error('uploadAiVitalReport Senoclock AI classification trigger error: ' . $e->getMessage());
             }
@@ -639,6 +571,190 @@ Rules:
             'status' => false,
             'message' => 'Either vital ID or user_id parameter is required.',
         ], 400);
+    }
+
+    /**
+     * Build Priority Parameters + top 5 Clinical Triggers for API and PDF (shared).
+     */
+    protected function buildLongevityPriorityAndTriggers(array $reportData, array $senoclockData, array $shenAiData): array
+    {
+        $mergedData = array_merge($reportData, $senoclockData, $shenAiData);
+        if (isset($mergedData['healthIndices']) && is_array($mergedData['healthIndices'])) {
+            $mergedData = array_merge($mergedData, $mergedData['healthIndices']);
+        }
+
+        $priorityParameters = [];
+        $rankedParams = null;
+        foreach ([
+            $shenAiData['ranked_parameters'] ?? null,
+            $senoclockData['ranked_parameters'] ?? null,
+            $senoclockData['data']['ranked_parameters'] ?? null,
+            $reportData['ranked_parameters'] ?? null,
+            $mergedData['ranked_parameters'] ?? null,
+        ] as $candidate) {
+            if (!empty($candidate) && is_array($candidate)) {
+                $rankedParams = $candidate;
+                break;
+            }
+        }
+
+        if (!empty($rankedParams)) {
+            usort($rankedParams, function ($a, $b) {
+                return ($a['rank'] ?? 999) <=> ($b['rank'] ?? 999);
+            });
+
+            foreach ($rankedParams as $param) {
+                if (!is_array($param)) {
+                    continue;
+                }
+
+                $rawName = $param['parameter_name'] ?? 'Unknown';
+                $resolved = $this->resolveParameterDetails($rawName, $param['input_value'] ?? null, $mergedData);
+
+                $unit = '-';
+                if (!empty($param['optimal_threshold'])) {
+                    if (preg_match('/([a-zA-Z%\/²³]+)$/', trim($param['optimal_threshold']), $matches)) {
+                        $unit = trim($matches[0]);
+                    }
+                }
+
+                $statusStr = $param['status'] ?? 'Normal';
+                $statusLower = strtolower($statusStr);
+                $statusColor = 'success';
+                if ($statusLower === 'high' || $statusLower === 'low') {
+                    $statusColor = 'danger';
+                } elseif ($statusLower === 'needs attention') {
+                    $statusColor = 'warning';
+                }
+
+                $pct = $param['percentage_out_of_range'] ?? null;
+                $pctStr = '-';
+                if ($pct !== null) {
+                    $pctStr = ($pct > 0 ? '+' : '') . $pct . '%';
+                }
+
+                $priorityParameters[] = [
+                    'name' => $resolved['name'],
+                    'key' => $resolved['key'],
+                    'value' => $resolved['value'],
+                    'unit' => $unit,
+                    'percentage_deviation' => $pctStr,
+                    'status' => ucfirst($statusStr),
+                    'status_color' => $statusColor,
+                ];
+            }
+        }
+
+        if (empty($priorityParameters)) {
+            $priorityParameters = $this->formatPriorityParameters($mergedData);
+        }
+
+        $clinicalTriggers = [];
+        $triggersSource = [];
+        foreach ([
+            $senoclockData['data']['trigger'] ?? null,
+            $senoclockData['trigger'] ?? null,
+            $senoclockData['data']['triggers'] ?? null,
+            $senoclockData['triggers'] ?? null,
+            $shenAiData['data']['trigger'] ?? null,
+            $shenAiData['trigger'] ?? null,
+            $shenAiData['data']['triggers'] ?? null,
+            $shenAiData['triggers'] ?? null,
+            $reportData['data']['trigger'] ?? null,
+            $reportData['trigger'] ?? null,
+            $mergedData['data']['trigger'] ?? null,
+            $mergedData['trigger'] ?? null,
+        ] as $candidate) {
+            if (!empty($candidate) && is_array($candidate)) {
+                $triggersSource = $candidate;
+                break;
+            }
+        }
+
+        if (!empty($triggersSource)) {
+            $relatedTriggers = [];
+            $allTriggers = [];
+            $triggerId = 1;
+
+            foreach ($triggersSource as $trig) {
+                if (!is_array($trig)) {
+                    continue;
+                }
+
+                $matchedConditions = [];
+                if (isset($trig['matched_conditions']) && is_array($trig['matched_conditions'])) {
+                    foreach ($trig['matched_conditions'] as $mc) {
+                        $normalized = $this->normalizeMatchedConditionFields($mc);
+                        if ($normalized !== null) {
+                            $matchedConditions[] = $normalized;
+                        }
+                    }
+                }
+
+                $cat = strtolower((string) ($trig['trigger_category'] ?? ''));
+                $icon = 'wellness.png';
+                if (str_contains($cat, 'metabolic') || str_contains($cat, 'insulin')) {
+                    $icon = 'insulin.png';
+                } elseif (str_contains($cat, 'respiratory')) {
+                    $icon = 'respiratory.png';
+                }
+
+                $item = [
+                    'id' => $triggerId++,
+                    'title' => $trig['trigger_name'] ?? 'Trigger',
+                    'description' => $trig['trigger_description'] ?? '',
+                    'matched_conditions' => $matchedConditions,
+                    'associated_organ_health' => $trig['associated_organ_health'] ?? '',
+                    'icon' => $icon,
+                ];
+
+                $allTriggers[] = $item;
+
+                if ($this->isTriggerRelatedToPriorityParameters($trig, $priorityParameters)) {
+                    $relatedTriggers[] = $item;
+                }
+            }
+
+            $clinicalTriggers = !empty($relatedTriggers)
+                ? array_slice($relatedTriggers, 0, 5)
+                : array_slice($allTriggers, 0, 5);
+
+            foreach ($clinicalTriggers as $i => &$triggerItem) {
+                $triggerItem['id'] = $i + 1;
+            }
+            unset($triggerItem);
+        }
+
+        return [
+            'priority_parameters' => $priorityParameters,
+            'clinical_triggers' => $clinicalTriggers,
+        ];
+    }
+
+    /**
+     * Normalize AI_Vital JSON fields to arrays for shared builders.
+     */
+    protected function longevityVitalPayloadArrays(AI_Vital $vital): array
+    {
+        $toArray = function ($value): array {
+            if (empty($value)) {
+                return [];
+            }
+            if (is_string($value)) {
+                $decoded = json_decode($value, true);
+                return is_array($decoded) ? $decoded : [];
+            }
+            if (is_object($value)) {
+                return json_decode(json_encode($value), true) ?: [];
+            }
+            return is_array($value) ? $value : [];
+        };
+
+        return [
+            $toArray($vital->report),
+            $toArray($vital->senoclock_ai_response),
+            $toArray($vital->shen_ai),
+        ];
     }
 
     /**
@@ -963,12 +1079,288 @@ Rules:
     }
 
     /**
+     * Normalize a matched condition into structured fields for PDF/API rendering.
+     * Never returns raw JSON/object dumps.
+     *
+     * @return array{name: string, result: string, unit: string, normal_range: string}|null
+     */
+    protected function normalizeMatchedConditionFields(mixed $mc): ?array
+    {
+        if ($mc === null || $mc === '') {
+            return null;
+        }
+
+        if (is_object($mc)) {
+            $mc = json_decode(json_encode($mc), true) ?: [];
+        }
+
+        $fallbackName = '';
+        $payload = null;
+
+        if (is_string($mc)) {
+            $trimmed = trim($mc);
+            if ($trimmed === '') {
+                return null;
+            }
+
+            // "Label { ... }" or "Label {'name': ...}"
+            if (preg_match('/^(.*?)\s*(\{[\s\S]*\})$/u', $trimmed, $m)) {
+                $fallbackName = trim($m[1]);
+                $payload = $this->parseObjectLikeString(trim($m[2]));
+            } else {
+                $payload = $this->parseObjectLikeString($trimmed);
+            }
+
+            // Plain text label only
+            if ($payload === null) {
+                if ($this->looksLikeRawObjectDump($trimmed)) {
+                    return null;
+                }
+                return [
+                    'name' => $trimmed,
+                    'result' => '—',
+                    'unit' => '—',
+                    'normal_range' => '—',
+                ];
+            }
+        } elseif (is_array($mc)) {
+            // Shape A: { parameter_name, matched_condition: {...|string} }
+            if (array_key_exists('matched_condition', $mc) || array_key_exists('parameter_name', $mc)) {
+                $fallbackName = trim((string) ($mc['parameter_name'] ?? $mc['name'] ?? ''));
+                $condition = $mc['matched_condition'] ?? null;
+
+                if (is_object($condition)) {
+                    $condition = json_decode(json_encode($condition), true);
+                }
+                if (is_string($condition)) {
+                    // Again may be "Label {...}" or pure object string
+                    $condTrim = trim($condition);
+                    if (preg_match('/^(.*?)\s*(\{[\s\S]*\})$/u', $condTrim, $m)) {
+                        if ($fallbackName === '') {
+                            $fallbackName = trim($m[1]);
+                        }
+                        $payload = $this->parseObjectLikeString(trim($m[2]));
+                    } else {
+                        $payload = $this->parseObjectLikeString($condTrim);
+                    }
+                    // Plain text matched_condition
+                    if ($payload === null && !$this->looksLikeRawObjectDump($condTrim) && $condTrim !== '') {
+                        return [
+                            'name' => $fallbackName !== '' ? $fallbackName : $condTrim,
+                            'result' => $fallbackName !== '' ? $condTrim : '—',
+                            'unit' => '—',
+                            'normal_range' => '—',
+                        ];
+                    }
+                } elseif (is_array($condition)) {
+                    $payload = $condition;
+                } else {
+                    $payload = $mc;
+                }
+            } else {
+                // Shape B: direct metric object { name, result, unit, normal_range }
+                $payload = $mc;
+            }
+        } else {
+            return null;
+        }
+
+        if (!is_array($payload)) {
+            return null;
+        }
+
+        $name = trim((string) ($fallbackName !== '' ? $fallbackName : ($payload['parameter_name'] ?? $payload['name'] ?? '')));
+        if ($name === '' && !empty($payload['name'])) {
+            $name = trim((string) $payload['name']);
+        }
+
+        $resultRaw = $payload['result'] ?? $payload['value'] ?? $payload['input_value'] ?? null;
+        $unitRaw = $payload['unit'] ?? null;
+        $rangeRaw = $payload['normal_range'] ?? $payload['range'] ?? null;
+
+        $result = $this->displayOrDash($resultRaw);
+        $unit = $this->displayOrDash($unitRaw);
+        $range = $this->displayOrDash($rangeRaw);
+
+        // Skip completely empty/invalid entries
+        if ($name === '' && $result === '—' && $unit === '—' && $range === '—') {
+            return null;
+        }
+
+        if ($name === '') {
+            $name = 'Parameter';
+        }
+
+        return [
+            'name' => $name,
+            'result' => $result,
+            'unit' => $unit,
+            'normal_range' => $range,
+        ];
+    }
+
+    /**
+     * Parse JSON or Python/JS-style single-quoted object strings into an array.
+     */
+    protected function parseObjectLikeString(string $text): ?array
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return null;
+        }
+
+        // Double-encoded / standard JSON (retry a few times)
+        $current = $text;
+        for ($i = 0; $i < 3; $i++) {
+            if ($current === '' || (!str_starts_with($current, '{') && !str_starts_with($current, '['))) {
+                break;
+            }
+            $decoded = json_decode($current, true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                if (is_array($decoded)) {
+                    return $decoded;
+                }
+                if (is_string($decoded)) {
+                    $current = trim($decoded);
+                    continue;
+                }
+            }
+            break;
+        }
+
+        // Single-quoted dict: {'name': 'bmi', 'result': '25', 'unit': '', 'normal_range': '18.5 - 24.9'}
+        if (str_starts_with($text, '{') && str_contains($text, "'")) {
+            $asJson = preg_replace('/(?<!\\\\)\'/', '"', $text);
+            $decoded = json_decode($asJson, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                return $decoded;
+            }
+
+            // Field-by-field extraction (handles awkward quoting)
+            $out = [];
+            foreach (['name', 'parameter_name', 'result', 'value', 'unit', 'normal_range', 'range'] as $key) {
+                if (preg_match('/[\'"]' . preg_quote($key, '/') . '[\'"]\s*:\s*[\'"]([^\'"]*)[\'"]/u', $text, $m)) {
+                    $out[$key] = $m[1];
+                } elseif (preg_match('/[\'"]' . preg_quote($key, '/') . '[\'"]\s*:\s*([^,}\s][^,}]*)/u', $text, $m)) {
+                    $out[$key] = trim($m[1], " \t\n\r\0\x0B'\"");
+                }
+            }
+            if (!empty($out)) {
+                return $out;
+            }
+        }
+
+        // Double-quoted but not valid for other reasons — try field extraction
+        if (str_starts_with($text, '{')) {
+            $out = [];
+            foreach (['name', 'parameter_name', 'result', 'value', 'unit', 'normal_range', 'range'] as $key) {
+                if (preg_match('/[\'"]' . preg_quote($key, '/') . '[\'"]\s*:\s*[\'"]([^\'"]*)[\'"]/u', $text, $m)) {
+                    $out[$key] = $m[1];
+                }
+            }
+            if (!empty($out)) {
+                return $out;
+            }
+        }
+
+        return null;
+    }
+
+    protected function displayOrDash(mixed $value): string
+    {
+        if ($value === null) {
+            return '—';
+        }
+        $text = trim((string) $value);
+        if ($text === '' || $text === '-' || $text === '/' || strtolower($text) === 'n/a' || strtolower($text) === 'null') {
+            return '—';
+        }
+        return $text;
+    }
+
+    protected function looksLikeRawObjectDump(string $text): bool
+    {
+        $text = trim($text);
+        return str_contains($text, '{') && (
+            str_contains($text, "'name'")
+            || str_contains($text, '"name"')
+            || str_contains($text, "'result'")
+            || str_contains($text, '"result"')
+            || str_contains($text, 'normal_range')
+        );
+    }
+
+    /**
+     * @deprecated Use normalizeMatchedConditionFields(); kept for any legacy callers.
+     */
+    protected function formatMatchedConditionLine(mixed $mc): string
+    {
+        $normalized = $this->normalizeMatchedConditionFields($mc);
+        if ($normalized === null) {
+            return '';
+        }
+        return trim(sprintf(
+            '%s — Result: %s, Unit: %s, Normal Range: %s',
+            $normalized['name'],
+            $normalized['result'],
+            $normalized['unit'],
+            $normalized['normal_range']
+        ));
+    }
+
+    protected function decodeJsonValue(mixed $value): mixed
+    {
+        if (!is_string($value)) {
+            return $value;
+        }
+        return $this->parseObjectLikeString(trim($value)) ?? $value;
+    }
+
+    protected function composeConditionParts(string $paramName, mixed $result, mixed $unit, mixed $range): string
+    {
+        $normalized = $this->normalizeMatchedConditionFields([
+            'parameter_name' => $paramName,
+            'matched_condition' => [
+                'result' => $result,
+                'unit' => $unit,
+                'normal_range' => $range,
+            ],
+        ]);
+        if ($normalized === null) {
+            return $paramName;
+        }
+        return trim(sprintf(
+            '%s — Result: %s, Unit: %s, Normal Range: %s',
+            $normalized['name'],
+            $normalized['result'],
+            $normalized['unit'],
+            $normalized['normal_range']
+        ));
+    }
+
+    protected function scrubJsonFromConditionText(string $text): string
+    {
+        $normalized = $this->normalizeMatchedConditionFields($text);
+        if ($normalized === null) {
+            return '';
+        }
+        return trim(sprintf(
+            '%s — Result: %s, Unit: %s, Normal Range: %s',
+            $normalized['name'],
+            $normalized['result'],
+            $normalized['unit'],
+            $normalized['normal_range']
+        ));
+    }
+
+    /**
      * Check if a clinical trigger is related to any parameter present in Priority Parameters.
      */
     protected function isTriggerRelatedToPriorityParameters(array $trig, array $priorityParameters): bool
     {
+        // When priority params are unavailable, allow triggers so clinical_triggers is not blank
         if (empty($priorityParameters)) {
-            return false;
+            return true;
         }
 
         $activeKeys = [];
@@ -1078,6 +1470,11 @@ Rules:
             'shen_ai' => is_string($aiVital->shen_ai) ? json_decode($aiVital->shen_ai) : $aiVital->shen_ai,
         ];
 
+        [$reportArr, $senoclockArr, $shenArr] = $this->longevityVitalPayloadArrays($aiVital);
+        $sections = $this->buildLongevityPriorityAndTriggers($reportArr, $senoclockArr, $shenArr);
+        $data['priorityParameters'] = $sections['priority_parameters'];
+        $data['clinicalTriggers'] = $sections['clinical_triggers'];
+
         $pdf = PDF::loadView($viewName, $data)
             ->setPaper('a4', 'portrait')
             ->setOptions([
@@ -1184,6 +1581,11 @@ Rules:
         $data['report'] = $mapFields($reportData);
         $data['shen_ai'] = $mapFields($shenAiData);
 
+        [$reportArr, $senoclockArr, $shenArr] = $this->longevityVitalPayloadArrays($ai_vital_report);
+        $sections = $this->buildLongevityPriorityAndTriggers($reportArr, $senoclockArr, $shenArr);
+        $data['priorityParameters'] = $sections['priority_parameters'];
+        $data['clinicalTriggers'] = $sections['clinical_triggers'];
+
         $viewName = $ai_vital_report->is_longevity == 1 ? 'pages.aivital_LongevityReport' : 'pages.vitalScanReport';
         if (!view()->exists($viewName)) {
             $viewName = 'pages.vitalScanReport';
@@ -1237,6 +1639,11 @@ Rules:
         $data['senoclock_ai_response'] = !empty($ai_vital_report->senoclock_ai_response) ? (is_string($ai_vital_report->senoclock_ai_response) ? json_decode($ai_vital_report->senoclock_ai_response) : $ai_vital_report->senoclock_ai_response) : '';
         $data['shen_ai'] = !empty($ai_vital_report->shen_ai) ? (is_string($ai_vital_report->shen_ai) ? json_decode($ai_vital_report->shen_ai) : $ai_vital_report->shen_ai) : '';
 
+        [$reportArr, $senoclockArr, $shenArr] = $this->longevityVitalPayloadArrays($ai_vital_report);
+        $sections = $this->buildLongevityPriorityAndTriggers($reportArr, $senoclockArr, $shenArr);
+        $data['priorityParameters'] = $sections['priority_parameters'];
+        $data['clinicalTriggers'] = $sections['clinical_triggers'];
+
         $viewName = $ai_vital_report->is_longevity == 1 ? 'pages.aivital_LongevityReport' : 'pages.vitalScanReport';
         if (!view()->exists($viewName)) {
             $viewName = 'pages.vitalScanReport';
@@ -1251,6 +1658,269 @@ Rules:
                 'isHtml5ParserEnabled' => true,
             ]);
         return $pdf->download($filename);
+    }
+
+    /**
+     * Download static Blood Age Report v3 PDF (mPDF / A4).
+     * GET /api/v1/newshenai-care/downloadBloodAgeReportV3
+     */
+    public function downloadBloodAgeReportV3(Request $request)
+    {
+        if (!view()->exists('pages.blood_age_report_v3')) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Blood Age Report template not found.',
+            ], 404);
+        }
+
+        $inline = $request->boolean('inline');
+        return $this->renderBloodAgeReportV3Pdf('blood_age_report_v3.pdf', !$inline);
+    }
+
+    /**
+     * Render Blood Age Report v3 PDF from the exact HTML preview markup.
+     * Uses Chrome/Edge headless print so flex/grid/SVG match the HTML preview.
+     * Caches the PDF by template mtime so preview reloads stay fast.
+     */
+    protected function renderBloodAgeReportV3Pdf(string $filename = 'blood_age_report_v3.pdf', bool $download = true)
+    {
+        @ini_set('memory_limit', '512M');
+        @ini_set('max_execution_time', '60');
+
+        $tempDir = storage_path('app/blood-age-chrome');
+        if (!is_dir($tempDir)) {
+            @mkdir($tempDir, 0777, true);
+        }
+
+        $viewPath = resource_path('views/pages/blood_age_report_v3.blade.php');
+        $cacheKey = 'v3_' . (is_file($viewPath) ? filemtime($viewPath) : '0');
+        $cachedPdf = $tempDir . DIRECTORY_SEPARATOR . $cacheKey . '.pdf';
+
+        // Serve cached PDF when the blade template has not changed.
+        if (is_file($cachedPdf) && filesize($cachedPdf) > 500) {
+            $content = file_get_contents($cachedPdf);
+            $disposition = $download ? 'attachment' : 'inline';
+
+            return response($content, 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => $disposition . '; filename="' . $filename . '"',
+                'Content-Length' => strlen($content),
+                'Cache-Control' => 'private, max-age=60',
+                'X-Blood-Age-PDF-Cache' => 'HIT',
+            ]);
+        }
+
+        $html = view('pages.blood_age_report_v3')->render();
+
+        // Chrome prints from a local file:// HTML document. Absolute http://asset
+        // URLs would re-hit artisan serve while it is blocked waiting for Chrome
+        // (images never load). Rewrite public asset URLs to local file:// paths.
+        $html = preg_replace_callback(
+            '#(?:https?://[^/"\']+)?/asset/([^"\'\s>]+)#i',
+            static function ($matches) {
+                $relative = rawurldecode($matches[1]);
+                $absolute = public_path('asset/' . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $relative));
+                if (!is_file($absolute)) {
+                    return $matches[0];
+                }
+                return 'file:///' . str_replace('\\', '/', $absolute);
+            },
+            $html
+        );
+
+        // Ensure print CSS is applied for Chromium PDF (exact match to HTML preview).
+        if (stripos($html, '@page') === false) {
+            $html = str_replace(
+                '</head>',
+                '<style>@page{size:A4 portrait;margin:0} @media print{html,body{background:#fff!important;padding:0!important;margin:0!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.page-container{width:210mm!important;min-height:297mm!important;height:297mm!important;margin:0!important;box-shadow:none!important;page-break-after:always;overflow:hidden}.page-container:last-child{page-break-after:auto}}</style></head>',
+                $html
+            );
+        }
+
+        $token = uniqid('preview_', true);
+        $htmlPath = $tempDir . DIRECTORY_SEPARATOR . $token . '.html';
+        $pdfPath = $tempDir . DIRECTORY_SEPARATOR . $token . '.pdf';
+        $outLog = $tempDir . DIRECTORY_SEPARATOR . $token . '.out.log';
+        $errLog = $tempDir . DIRECTORY_SEPARATOR . $token . '.err.log';
+
+        file_put_contents($htmlPath, $html);
+
+        $browser = $this->findChromiumExecutable();
+        if ($browser === null) {
+            @unlink($htmlPath);
+            return response()->json([
+                'status' => false,
+                'message' => 'Chrome/Edge not found. Install Google Chrome or Microsoft Edge to generate an exact HTML PDF preview.',
+            ], 500);
+        }
+
+        $htmlUri = 'file:///' . str_replace('\\', '/', $htmlPath);
+        $chromeArgs = [
+            '--headless=new',
+            '--disable-gpu',
+            '--disable-software-rasterizer',
+            '--disable-dev-shm-usage',
+            '--no-first-run',
+            '--no-default-browser-check',
+            '--allow-file-access-from-files',
+            '--no-pdf-header-footer',
+            '--print-to-pdf-no-header',
+            '--run-all-compositor-stages-before-draw',
+            '--virtual-time-budget=2000',
+            '--print-to-pdf=' . $pdfPath,
+            $htmlUri,
+        ];
+
+        $stderr = '';
+        if (strncasecmp(PHP_OS, 'WIN', 3) === 0) {
+            // PowerShell Start-Process is more reliable than proc_open on Windows
+            // (avoids hung Chromium locking artisan serve).
+            $psArgs = implode(', ', array_map(static function ($arg) {
+                return "'" . str_replace("'", "''", $arg) . "'";
+            }, $chromeArgs));
+            $psBrowser = str_replace("'", "''", $browser);
+            $ps = 'powershell -NoProfile -ExecutionPolicy Bypass -Command '
+                . '"$p = Start-Process -FilePath \'' . $psBrowser . '\' -ArgumentList @(' . $psArgs . ') -PassThru -WindowStyle Hidden; '
+                . 'if (-not $p.WaitForExit(20000)) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; '
+                . 'Get-CimInstance Win32_Process -Filter \"Name=\'chrome.exe\'\" | '
+                . 'Where-Object { $_.CommandLine -match \'print-to-pdf\' } | '
+                . 'ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }"';
+            @exec($ps . ' 2>NUL');
+        } else {
+            $cmd = array_merge([$browser], $chromeArgs);
+            $descriptor = [
+                0 => ['pipe', 'r'],
+                1 => ['file', $outLog, 'w'],
+                2 => ['file', $errLog, 'w'],
+            ];
+            $process = proc_open($cmd, $descriptor, $pipes, null, null, ['bypass_shell' => true]);
+            if (is_resource($process)) {
+                fclose($pipes[0]);
+                $timeoutSec = 20;
+                $start = microtime(true);
+                $status = proc_get_status($process);
+                while ($status['running']) {
+                    if ((microtime(true) - $start) > $timeoutSec) {
+                        if (!empty($status['pid'])) {
+                            @exec('kill -9 ' . (int) $status['pid'] . ' 2>/dev/null');
+                        }
+                        proc_terminate($process, 9);
+                        break;
+                    }
+                    usleep(100000);
+                    $status = proc_get_status($process);
+                }
+                proc_close($process);
+                if (is_file($errLog)) {
+                    $stderr = (string) file_get_contents($errLog);
+                }
+            }
+        }
+
+        $tries = 0;
+        while ((!is_file($pdfPath) || filesize($pdfPath) < 500) && $tries < 10) {
+            usleep(100000);
+            $tries++;
+        }
+
+        @unlink($htmlPath);
+        @unlink($outLog);
+        @unlink($errLog);
+
+        if (!is_file($pdfPath) || filesize($pdfPath) < 500) {
+            @unlink($pdfPath);
+            Log::error('Blood Age Chrome PDF failed', ['stderr' => $stderr, 'browser' => $browser]);
+            // Inline preview: fall back to fast HTML so the browser is not stuck on a blank load.
+            if (!$download) {
+                return redirect('/preview-blood-age-report-v3-html');
+            }
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to generate PDF from HTML preview (timed out or empty output). Try /preview-blood-age-report-v3-html for a fast layout check.',
+                'detail' => trim($stderr) !== '' ? trim($stderr) : 'Empty PDF output',
+            ], 500);
+        }
+
+        // Persist cache keyed by blade mtime; drop older preview caches.
+        @copy($pdfPath, $cachedPdf);
+        foreach (glob($tempDir . DIRECTORY_SEPARATOR . 'v3_*.pdf') ?: [] as $oldCache) {
+            if ($oldCache !== $cachedPdf) {
+                @unlink($oldCache);
+            }
+        }
+
+        $content = file_get_contents($pdfPath);
+        @unlink($pdfPath);
+
+        $disposition = $download ? 'attachment' : 'inline';
+
+        return response($content, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => $disposition . '; filename="' . $filename . '"',
+            'Content-Length' => strlen($content),
+            'Cache-Control' => 'private, max-age=60',
+            'X-Blood-Age-PDF-Cache' => 'MISS',
+        ]);
+    }
+
+    /**
+     * Locate Chrome or Edge for headless HTML→PDF printing.
+     */
+    protected function findChromiumExecutable(): ?string
+    {
+        $candidates = [
+            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+            'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+            'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/chromium-browser',
+            '/usr/bin/chromium',
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+        ];
+
+        foreach ($candidates as $path) {
+            if (is_file($path)) {
+                return $path;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Extract inner HTML for one report page after splitting on the opening .page div.
+     * (Kept for compatibility with any callers/helpers.)
+     */
+    protected function extractBloodAgeReportPageInnerHtml(string $chunk): string
+    {
+        $depth = 1;
+        $pos = 0;
+        $len = strlen($chunk);
+
+        while ($pos < $len && $depth > 0) {
+            $nextOpen = stripos($chunk, '<div', $pos);
+            $nextClose = stripos($chunk, '</div>', $pos);
+            if ($nextClose === false) {
+                break;
+            }
+
+            if ($nextOpen !== false && $nextOpen < $nextClose) {
+                $depth++;
+                $pos = $nextOpen + 4;
+                continue;
+            }
+
+            $depth--;
+            if ($depth === 0) {
+                return substr($chunk, 0, $nextClose);
+            }
+            $pos = $nextClose + 6;
+        }
+
+        return rtrim($chunk);
     }
 
     public function myRetreatPlans(Request $request)

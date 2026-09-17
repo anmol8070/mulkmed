@@ -48,9 +48,10 @@ Route::get('/react/{any?}', function () {
     return file_get_contents(public_path('dist/index.html'));
 })->where('any', '.*');
 
-Route::get('/clear-config-cache', function () {
-    Artisan::call('config:clear');
-    return 'Config cache cleared!';
+Route::get('/preview-blood-age-report-v3', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'downloadBloodAgeReportV3']);
+// Fast HTML preview (no Chrome PDF) — preferred while iterating on layout:
+Route::get('/preview-blood-age-report-v3-html', function () {
+    return view('pages.blood_age_report_v3');
 });
 
 Route::get('/linkstorage', function () {

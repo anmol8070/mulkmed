@@ -41,6 +41,7 @@ class PatientAppointmentController extends Controller
             'password' => 'required',
             'confirm_password' => 'required|same:password',
             'id_number' => 'nullable',
+            'country_code' => 'nullable',
             'type' => 'required',
         ]);
 
@@ -74,6 +75,7 @@ class PatientAppointmentController extends Controller
         $user->password = ($request->password);
         $user->ref_id = $request->id_number;
         $user->phone_number = $request->phone_number;
+        $user->country_code = $request->country_code;
         $user->type = $request->type ?? null;
         $user->save();
 

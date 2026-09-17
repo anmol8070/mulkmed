@@ -9,15 +9,15 @@
     <meta content="width=device-width, initial-scale=1, maximum-scale=1, shrink-to-fit=no" name="viewport">
     <title>{{ __('MULKMED') }}</title>
     <!-- General CSS Files -->
-    <link rel="stylesheet" href="asset/css/app.min.css">
-    <link rel="stylesheet" href="asset/bundles/bootstrap-social/bootstrap-social.css">
+    <link rel="stylesheet" href="{{ asset('asset/css/app.min.css') }}">
+    <link rel="stylesheet" href="{{ asset('asset/bundles/bootstrap-social/bootstrap-social.css') }}">
     <!-- Template CSS -->
-    <link rel="stylesheet" href="asset/css/style.css">
-    <link rel="stylesheet" href="asset/css/components.css">
+    <link rel="stylesheet" href="{{ asset('asset/css/style.css') }}">
+    <link rel="stylesheet" href="{{ asset('asset/css/components.css') }}">
     <!-- Custom style CSS -->
-    <link rel="stylesheet" href="asset/css/custom.css">
-    <link rel="stylesheet" href="asset/css/loginPage.css">
-    <link rel='shortcut icon' type='image/x-icon' href='asset/img/favicon.ico' />
+    <link rel="stylesheet" href="{{ asset('asset/css/custom.css') }}">
+    <link rel="stylesheet" href="{{ asset('asset/css/loginPage.css') }}">
+    <link rel='shortcut icon' type='image/x-icon' href="{{ asset('asset/img/favicon.ico') }}" />
 </head>
 
 <body>
@@ -26,7 +26,7 @@
     <div class="main-login-row">
         <div class="width-50 ">
             <div class="main-login-two-box">
-                <div class="img-full-box" style="background-image: url(./asset/image/login_page.jpg)">
+                <div class="img-full-box" style="background-image: url('{{ asset('asset/image/login_page.jpg') }}')">
                     <div class="center-title-text">
                         <div class="bottom-blur-inner">
                             <h1 class="main-title font-40 gil-heavy">{{ ('MULKMED') }}</h1>
@@ -96,13 +96,13 @@
 
 
     <!-- General JS Scripts -->
-    <script src="asset/js/app.min.js"></script>
+    <script src="{{ asset('asset/js/app.min.js') }}"></script>
     <!-- JS Libraies -->
     <!-- Page Specific JS File -->
     <!-- Template JS File -->
-    <script src="asset/js/scripts.js"></script>
+    <script src="{{ asset('asset/js/scripts.js') }}"></script>
     <!-- Custom JS File -->
-    <script src="asset/js/custom.js"></script>
+    <script src="{{ asset('asset/js/custom.js') }}"></script>
 </body>
 
 
