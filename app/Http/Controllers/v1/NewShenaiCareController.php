@@ -89,42 +89,7 @@ class NewShenaiCareController extends Controller
 
         $longevityDoctors = $this->getMulkLongevityDoctors();
 
-        // Fetch Major Organ Tests
-        $majorOrganTests = \App\Models\MajorOrganTest::where('status', 1)
-            ->orderBy('display_order', 'asc')
-            ->orderBy('id', 'asc')
-            ->get()
-            ->map(function ($item) use ($currency) {
-                $biomarkers = is_array($item->biomarkers) ? $item->biomarkers : [];
-                return [
-                    'id' => $item->id,
-                    'name' => $item->name,
-                    'icon' => !empty($item->icon) ? ltrim($item->icon, '/') : null,
-                    'currency' => $currency,
-                    'price' => number_format((float) CurrencyHelper::convert($item->price, $currency), 2, '.', ''),
-                    'biomarker_count' => count($biomarkers),
-                    'biomarkers' => $biomarkers,
-                ];
-            });
-
-        // Fetch Major Organ Package
-        $package = \App\Models\MajorOrganPackage::where('status', 1)->first();
-        $packageData = null;
-        if ($package) {
-            $packageData = [
-                'id' => $package->id,
-                'title' => $package->title,
-                'badge' => $package->badge,
-                'description' => $package->description,
-                'currency' => $currency,
-                'price' => number_format((float) CurrencyHelper::convert($package->price, $currency), 2, '.', ''),
-                'image' => !empty($package->image) ? ltrim($package->image, '/') : null,
-                'status' => (int) $package->status,
-                'organ_health_check_count' => $majorOrganTests->count(),
-                'total_biomarkers' => $majorOrganTests->sum('biomarker_count'),
-                'summary' => $majorOrganTests->count() . ' Organ Health Check • ' . $majorOrganTests->sum('biomarker_count') . ' Biomarkers',
-            ];
-        }
+        $recommendedOrganHealth = $this->buildRecommendedOrganHealthSection($currency);
 
         // Fetch Longevity Plans
         $longevityPlans = \App\Models\LongevityPlan::where('status', 1)
@@ -174,18 +139,81 @@ class NewShenaiCareController extends Controller
                 'section_type' => 'mulk_longevity_doctors',
                 'doctors' => $longevityDoctors,
             ],
-            'recommended_organ_health' => [
-                'title' => 'Recommended Organ Health and Mulk Longevity Panel',
-                'section_type' => 'recommended_organ_health',
-                'package' => $packageData,
-                'tests' => $majorOrganTests,
-            ],
+            'recommended_organ_health' => $recommendedOrganHealth,
             'longevity_plans' => [
                 'title' => 'Mulk Wellness Retreats and Longevity Plans',
                 'section_type' => 'longevity_plans',
                 'plans' => $longevityPlans,
             ],
         ], 200);
+    }
+
+    /**
+     * Recommended Organ Health and Mulk Longevity Panel section as a standalone API.
+     * Returns the same payload as the `recommended_organ_health` key of getLatestLongevityReport().
+     */
+    public function recommendedOrganHealth(Request $request): JsonResponse
+    {
+        $currency = CurrencyHelper::getUserCurrency();
+        $section = $this->buildRecommendedOrganHealthSection($currency);
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Recommended Organ Health and Mulk Longevity Panel retrieved successfully.',
+            'currency' => $currency,
+            'recommended_organ_health' => $section,
+        ], 200);
+    }
+
+    /**
+     * Build the Recommended Organ Health and Mulk Longevity Panel section.
+     */
+    protected function buildRecommendedOrganHealthSection(string $currency): array
+    {
+        $majorOrganTests = MajorOrganTest::where('status', 1)
+            ->orderBy('display_order', 'asc')
+            ->orderBy('id', 'asc')
+            ->get()
+            ->map(function ($item) use ($currency) {
+                $biomarkers = is_array($item->biomarkers) ? $item->biomarkers : [];
+                return [
+                    'id' => $item->id,
+                    'name' => $item->name,
+                    'icon' => !empty($item->icon) ? ltrim($item->icon, '/') : null,
+                    'currency' => $currency,
+                    'price' => number_format((float) CurrencyHelper::convert($item->price, $currency), 2, '.', ''),
+                    'biomarker_count' => count($biomarkers),
+                    'biomarkers' => $biomarkers,
+                ];
+            });
+
+        // Fetch all active Major Organ Packages (Comprehensive, Basic, etc.)
+        $packagesData = MajorOrganPackage::where('status', 1)
+            ->orderBy('id', 'asc')
+            ->get()
+            ->map(function ($pkg) use ($currency, $majorOrganTests) {
+                return [
+                    'id' => $pkg->id,
+                    'title' => $pkg->title,
+                    'badge' => $pkg->badge,
+                    'description' => $pkg->description,
+                    'currency' => $currency,
+                    'price' => number_format((float) CurrencyHelper::convert($pkg->price, $currency), 2, '.', ''),
+                    'image' => !empty($pkg->image) ? ltrim($pkg->image, '/') : null,
+                    'status' => (int) $pkg->status,
+                    'organ_health_check_count' => $majorOrganTests->count(),
+                    'total_biomarkers' => $majorOrganTests->sum('biomarker_count'),
+                    'summary' => $majorOrganTests->count() . ' Organ Health Check • ' . $majorOrganTests->sum('biomarker_count') . ' Biomarkers',
+                ];
+            })->values();
+
+        return [
+            'title' => 'Recommended Organ Health and Mulk Longevity Panel',
+            'section_type' => 'recommended_organ_health',
+            'package' => $packagesData->first(),
+            'packages' => $packagesData,
+            'tests' => $majorOrganTests,
+        ];
     }
 
     /**
@@ -384,17 +412,21 @@ Rules:
 
             $payload = [
                 'model' => config('services.openai.model', 'gpt-4o'),
+                'text' => [
+                    'format' => ['type' => 'json_object'],
+                ],
                 'input' => [
                     [
                         'role' => 'user',
                         'content' => [
                             [
-                                'type' => 'input_text',
-                                'text' => $prompt,
-                            ],
-                            [
                                 'type' => 'input_file',
                                 'file_id' => $uploadedPdf['file_id'],
+                                'detail' => 'high',
+                            ],
+                            [
+                                'type' => 'input_text',
+                                'text' => $prompt,
                             ]
                         ],
                     ],
@@ -402,6 +434,7 @@ Rules:
             ];
 
             $response = $analyzerService->openAiHttpClient($apiKey)
+                ->timeout(240)
                 ->post('https://api.openai.com/v1/responses', $payload);
 
             $responseData = $response->json();
@@ -574,16 +607,53 @@ Rules:
     }
 
     /**
+     * Flatten report / senoclock / shen_ai payloads so metric lookups can use root keys.
+     */
+    protected function flattenLongevityMetrics(array $reportData, array $senoclockData, array $shenAiData): array
+    {
+        $merged = [];
+
+        foreach ([$reportData, $senoclockData, $shenAiData] as $source) {
+            if (!is_array($source) || empty($source)) {
+                continue;
+            }
+
+            $layers = [$source];
+            if (isset($source['data']) && is_array($source['data'])) {
+                $layers[] = $source['data'];
+            }
+
+            foreach ($layers as $layer) {
+                foreach ($layer as $key => $value) {
+                    if ($value !== null && $value !== '' && $key !== 'healthIndices' && $key !== 'data') {
+                        $merged[$key] = $value;
+                    }
+                }
+
+                if (isset($layer['healthIndices']) && is_array($layer['healthIndices'])) {
+                    foreach ($layer['healthIndices'] as $key => $value) {
+                        if ($value !== null && $value !== '') {
+                            $merged[$key] = $value;
+                        }
+                    }
+                }
+            }
+        }
+
+        return $merged;
+    }
+
+    /**
      * Build Priority Parameters + top 5 Clinical Triggers for API and PDF (shared).
+     * Priority parameters come from the scan's ranked parameters (out-of-range
+     * findings), so the API response and the PDF Measurement Results table
+     * always show the same rows. The fixed metric set is only a last resort
+     * when the scan payload has no ranked parameters at all.
      */
     protected function buildLongevityPriorityAndTriggers(array $reportData, array $senoclockData, array $shenAiData): array
     {
-        $mergedData = array_merge($reportData, $senoclockData, $shenAiData);
-        if (isset($mergedData['healthIndices']) && is_array($mergedData['healthIndices'])) {
-            $mergedData = array_merge($mergedData, $mergedData['healthIndices']);
-        }
+        $mergedData = $this->flattenLongevityMetrics($reportData, $senoclockData, $shenAiData);
 
-        $priorityParameters = [];
         $rankedParams = null;
         foreach ([
             $shenAiData['ranked_parameters'] ?? null,
@@ -598,9 +668,10 @@ Rules:
             }
         }
 
+        $priorityParameters = [];
         if (!empty($rankedParams)) {
             usort($rankedParams, function ($a, $b) {
-                return ($a['rank'] ?? 999) <=> ($b['rank'] ?? 999);
+                return (is_array($a) ? ($a['rank'] ?? 999) : 999) <=> (is_array($b) ? ($b['rank'] ?? 999) : 999);
             });
 
             foreach ($rankedParams as $param) {
@@ -608,39 +679,31 @@ Rules:
                     continue;
                 }
 
-                $rawName = $param['parameter_name'] ?? 'Unknown';
+                $rawName = (string) ($param['parameter_name'] ?? $param['name'] ?? '');
+                if ($rawName === '') {
+                    continue;
+                }
+
                 $resolved = $this->resolveParameterDetails($rawName, $param['input_value'] ?? null, $mergedData);
-
-                $unit = '-';
-                if (!empty($param['optimal_threshold'])) {
-                    if (preg_match('/([a-zA-Z%\/²³]+)$/', trim($param['optimal_threshold']), $matches)) {
-                        $unit = trim($matches[0]);
-                    }
+                $status = trim((string) ($param['status'] ?? 'Normal'));
+                if ($status === '') {
+                    $status = 'Normal';
                 }
 
-                $statusStr = $param['status'] ?? 'Normal';
-                $statusLower = strtolower($statusStr);
-                $statusColor = 'success';
-                if ($statusLower === 'high' || $statusLower === 'low') {
-                    $statusColor = 'danger';
-                } elseif ($statusLower === 'needs attention') {
-                    $statusColor = 'warning';
-                }
-
-                $pct = $param['percentage_out_of_range'] ?? null;
+                $pct = $param['percentage_out_of_range'] ?? $param['percentage_deviation'] ?? null;
                 $pctStr = '-';
-                if ($pct !== null) {
-                    $pctStr = ($pct > 0 ? '+' : '') . $pct . '%';
+                if ($pct !== null && $pct !== '' && is_numeric($pct)) {
+                    $pctStr = ((float) $pct > 0 ? '+' : '') . $pct . '%';
                 }
 
                 $priorityParameters[] = [
                     'name' => $resolved['name'],
                     'key' => $resolved['key'],
                     'value' => $resolved['value'],
-                    'unit' => $unit,
+                    'unit' => $this->extractParameterUnit($param, $resolved['key']),
                     'percentage_deviation' => $pctStr,
-                    'status' => ucfirst($statusStr),
-                    'status_color' => $statusColor,
+                    'status' => ucfirst($status),
+                    'status_color' => $this->statusColorFromStatus($status),
                 ];
             }
         }
@@ -758,134 +821,163 @@ Rules:
     }
 
     /**
-     * Helper to format Priority Parameters table.
+     * Same 5 Measurement Results rows as the longevity PDF (page 4).
      */
     protected function formatPriorityParameters(array $data): array
     {
-        $parameters = [];
+        $wellness = (float) ($this->findMetricValue($data, ['wellnessScore', 'wellness_score', 'Wellness Score']) ?? 0);
+        $hrv = (float) ($this->findMetricValue($data, ['hrvSdnnMs', 'hrv', 'hrv_sdnn_ms', 'hrvLnRmssdMs', 'Heart Rate Variability (HRV)', 'HRV']) ?? 0);
+        $bmi = (float) ($this->findMetricValue($data, ['bmi', 'Body Mass Index (BMI)', 'BMI']) ?? 0);
+        $bmr = (float) ($this->findMetricValue($data, ['basalMetabolicRate', 'bmr', 'BMR (Kcal)', 'BMR', 'Basal Metabolic Rate (BMR)']) ?? 0);
+        $tdee = (float) ($this->findMetricValue($data, ['totalDailyEnergyExpenditure', 'tdee', 'TDEE (Kcal)', 'TDEE', 'Total Daily Energy Expenditure (TDEE)']) ?? 0);
 
-        // 1. Wellness Score
-        $wellness = $this->findMetricValue($data, ['wellnessScore', 'wellness_score', 'Wellness Score']);
-        if ($wellness !== null) {
-            $val = round((float)$wellness, 2);
-            $status = $val < 60 ? 'Needs Attention' : ($val < 80 ? 'Normal' : 'Optimal');
-            $parameters[] = [
+        $wellnessVal = round($wellness, 2);
+        $wellnessStatus = $wellnessVal >= 70 ? 'Normal' : ($wellnessVal >= 45 ? 'Needs Attention' : 'Low');
+
+        $hrvVal = (int) round($hrv);
+        $hrvStatus = $hrvVal >= 70 ? 'Normal' : 'Low';
+
+        $bmiVal = round($bmi, 1);
+        if ($bmiVal >= 18.5 && $bmiVal <= 24.9) {
+            $bmiStatus = 'Normal';
+        } elseif ($bmiVal > 24.9) {
+            $bmiStatus = 'High';
+        } else {
+            $bmiStatus = 'Low';
+        }
+
+        return [
+            [
                 'name' => 'Wellness Score',
                 'key' => 'wellnessScore',
-                'value' => $val,
+                'value' => $wellnessVal,
                 'unit' => '-',
-                'percentage_deviation' => '+6%',
-                'status' => $status,
-                'status_color' => $status === 'Needs Attention' ? 'warning' : 'success',
-            ];
-        }
-
-        // 2. HRV
-        $hrv = $this->findMetricValue($data, ['hrvSdnnMs', 'hrv', 'hrvLnRmssdMs', 'Heart Rate Variability (HRV)']);
-        if ($hrv !== null) {
-            $val = round((float)$hrv, 1);
-            $status = $val < 30 ? 'Low' : ($val > 100 ? 'High' : 'Normal');
-            $parameters[] = [
-                'name' => 'HRV',
+                'percentage_deviation' => $this->percentageDeviation($wellnessVal, 47.5),
+                'status' => $wellnessStatus,
+                'status_color' => $this->statusColorFromStatus($wellnessStatus),
+            ],
+            [
+                'name' => 'HRV (Heart Rate Variability)',
                 'key' => 'hrvSdnnMs',
-                'value' => $val,
+                'value' => $hrvVal,
                 'unit' => 'ms',
-                'percentage_deviation' => '-13%',
-                'status' => $status,
-                'status_color' => $status === 'Low' ? 'danger' : 'success',
-            ];
-        }
-
-        // 3. BMI
-        $bmi = $this->findMetricValue($data, ['bmi', 'Body Mass Index (BMI)']);
-        if ($bmi !== null) {
-            $val = round((float)$bmi, 1);
-            $status = $val > 25 ? 'High' : ($val < 18.5 ? 'Low' : 'Normal');
-            $parameters[] = [
+                'percentage_deviation' => $this->percentageDeviation($hrvVal, 74),
+                'status' => $hrvStatus,
+                'status_color' => $this->statusColorFromStatus($hrvStatus),
+            ],
+            [
                 'name' => 'BMI',
                 'key' => 'bmi',
-                'value' => $val,
+                'value' => $bmiVal,
                 'unit' => '-',
-                'percentage_deviation' => '+16%',
-                'status' => $status,
-                'status_color' => $status === 'High' ? 'danger' : 'success',
-            ];
-        }
-
-        // 4. BMR (Kcal)
-        $bmr = $this->findMetricValue($data, ['basalMetabolicRate', 'bmr', 'BMR (Kcal)', 'Basal Metabolic Rate (BMR)']);
-        if ($bmr !== null) {
-            $val = round((float)$bmr, 1);
-            $parameters[] = [
+                'percentage_deviation' => $this->percentageDeviation($bmiVal, 25),
+                'status' => $bmiStatus,
+                'status_color' => $this->statusColorFromStatus($bmiStatus),
+            ],
+            [
                 'name' => 'BMR (Kcal)',
                 'key' => 'basalMetabolicRate',
-                'value' => $val,
+                'value' => round($bmr, 1),
                 'unit' => 'Kcal',
-                'percentage_deviation' => '+2%',
+                'percentage_deviation' => $this->percentageDeviation($bmr, 1335),
                 'status' => 'Normal',
                 'status_color' => 'success',
-            ];
-        }
-
-        // 5. TDEE (Kcal)
-        $tdee = $this->findMetricValue($data, ['totalDailyEnergyExpenditure', 'tdee', 'TDEE (Kcal)', 'Total Daily Energy Expenditure (TDEE)']);
-        if ($tdee !== null) {
-            $val = round((float)$tdee, 1);
-            $parameters[] = [
+            ],
+            [
                 'name' => 'TDEE (Kcal)',
                 'key' => 'totalDailyEnergyExpenditure',
-                'value' => $val,
+                'value' => round($tdee, 1),
                 'unit' => 'Kcal',
-                'percentage_deviation' => '+4%',
+                'percentage_deviation' => $this->percentageDeviation($tdee, 1805),
                 'status' => 'Normal',
                 'status_color' => 'success',
-            ];
+            ],
+        ];
+    }
+
+    /**
+     * Unit for a ranked parameter: explicit unit, else the trailing unit of the
+     * optimal threshold text ("high: >= 20.0 bpm"), else a known metric unit.
+     */
+    protected function extractParameterUnit(array $param, string $key): string
+    {
+        $explicit = trim((string) ($param['unit'] ?? ''));
+        if ($explicit !== '') {
+            return $explicit;
         }
 
-        // 6. Vascular Age
-        $vascAge = $this->findMetricValue($data, ['vascularAge', 'vascular_age', 'Vascular Age']);
-        if ($vascAge !== null) {
-            $val = round((float)$vascAge, 1);
-            $parameters[] = [
-                'name' => 'Vascular Age',
-                'key' => 'vascularAge',
-                'value' => $val,
-                'unit' => 'years',
-                'percentage_deviation' => '0%',
-                'status' => 'Normal',
-                'status_color' => 'success',
-            ];
+        $threshold = trim((string) ($param['optimal_threshold'] ?? $param['normal_range'] ?? ''));
+        if ($threshold !== '' && preg_match('/([a-zA-Z%\/][a-zA-Z%\/\^0-9]*)\s*$/u', $threshold, $matches)) {
+            $candidate = trim($matches[1]);
+            $reserved = ['high', 'low', 'normal', 'and', 'or', 'to', 'score', 'index'];
+            if (!in_array(strtolower($candidate), $reserved, true)) {
+                return $candidate;
+            }
         }
 
-        // 7. Stress Index
-        $stress = $this->findMetricValue($data, ['stressLevel', 'stressIndex', 'stress_index', 'Stress Index']);
-        if ($stress !== null) {
-            $val = round((float)$stress, 1);
-            $status = $val > 5 ? 'High' : 'Normal';
-            $parameters[] = [
-                'name' => 'Stress Index',
-                'key' => 'stressLevel',
-                'value' => $val,
-                'unit' => '-',
-                'percentage_deviation' => '+3%',
-                'status' => $status,
-                'status_color' => $status === 'High' ? 'warning' : 'success',
-            ];
+        $knownUnits = [
+            'hrvSdnnMs' => 'ms',
+            'basalMetabolicRate' => 'Kcal',
+            'totalDailyEnergyExpenditure' => 'Kcal',
+            'heartRate' => 'bpm',
+            'respiratoryRate' => 'bpm',
+            'bloodPressure' => 'mmHg',
+            'oxygenSaturation' => '%',
+            'bodyFat' => '%',
+            'vascularAge' => 'years',
+        ];
+
+        return $knownUnits[$key] ?? '-';
+    }
+
+    protected function percentageDeviation(float $value, float $target): string
+    {
+        if ($target == 0.0) {
+            return '-';
         }
 
-        return $parameters;
+        $pct = (($value - $target) / $target) * 100;
+
+        return ($pct >= 0 ? '+' : '') . round($pct) . '%';
+    }
+
+    protected function statusColorFromStatus(string $status): string
+    {
+        $lower = strtolower($status);
+        if (str_contains($lower, 'needs attention')) {
+            return 'warning';
+        }
+        if (str_contains($lower, 'low') || str_contains($lower, 'high')) {
+            return 'danger';
+        }
+
+        return 'success';
     }
 
     protected function findMetricValue(array $data, array $keys): mixed
     {
-        foreach ($keys as $key) {
-            if (array_key_exists($key, $data) && $data[$key] !== null && $data[$key] !== '') {
-                $extracted = $this->extractScalarValue($data[$key]);
-                if ($extracted !== null && $extracted !== '') {
-                    return $extracted;
+        $sources = [$data];
+        if (isset($data['healthIndices']) && is_array($data['healthIndices'])) {
+            $sources[] = $data['healthIndices'];
+        }
+        if (isset($data['data']) && is_array($data['data'])) {
+            $sources[] = $data['data'];
+            if (isset($data['data']['healthIndices']) && is_array($data['data']['healthIndices'])) {
+                $sources[] = $data['data']['healthIndices'];
+            }
+        }
+
+        foreach ($sources as $source) {
+            foreach ($keys as $key) {
+                if (array_key_exists($key, $source) && $source[$key] !== null && $source[$key] !== '') {
+                    $extracted = $this->extractScalarValue($source[$key]);
+                    if ($extracted !== null && $extracted !== '') {
+                        return $extracted;
+                    }
                 }
             }
         }
+
         return null;
     }
 
@@ -1058,16 +1150,9 @@ Rules:
             if ($extractedInput !== null && $extractedInput !== '' && $extractedInput != 1 && $extractedInput != '1') {
                 $value = is_numeric($extractedInput) ? round((float) $extractedInput, 2) : $extractedInput;
             } else {
-                $defaults = [
-                    'wellnessScore' => 51.25,
-                    'hrvSdnnMs' => 65,
-                    'bmi' => 29.5,
-                    'basalMetabolicRate' => 1361.1,
-                    'totalDailyEnergyExpenditure' => 1877.1,
-                    'vascularAge' => 35,
-                    'stressLevel' => 3.2,
-                ];
-                $value = $defaults[$finalKey] ?? 0;
+                // No measured value in the scan payload: show a placeholder
+                // instead of a made-up number.
+                $value = '-';
             }
         }
 
@@ -1678,9 +1763,20 @@ Rules:
     }
 
     /**
+     * Legacy writer used when biomarkers were missing.
+     * Disabled: blood_age_report_v3 is not used in the Senoclock/lab-report PDF flow.
+     */
+    public function writeBloodAgeReportV3Pdf(string $destPath): bool
+    {
+        Log::warning('writeBloodAgeReportV3Pdf skipped — blood_age_report_v3 PDF generation is unused', [
+            'dest' => $destPath,
+        ]);
+        return false;
+    }
+
+    /**
      * Render Blood Age Report v3 PDF from the exact HTML preview markup.
-     * Uses Chrome/Edge headless print so flex/grid/SVG match the HTML preview.
-     * Caches the PDF by template mtime so preview reloads stay fast.
+     * Preview/download helper only — not used by ProcessSenoclockIntegration.
      */
     protected function renderBloodAgeReportV3Pdf(string $filename = 'blood_age_report_v3.pdf', bool $download = true)
     {

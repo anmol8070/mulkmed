@@ -126,11 +126,14 @@ class ProcessSenoclockIntegration implements ShouldQueue
 
             $availableCount = $labReport->available_count ?? count($availableBiomarkers);
 
-            // Case 4: available_count is 0
-            if ($availableCount === 0) {
-                Log::warning("ProcessSenoclockIntegration: available_count is 0. Aborting execution for LabReport #{$labReport->id}");
-                return;
-            }
+            // Do not fail the report when biomarker count is 0.
+            // Case 4: available_count is 0 — continue if extracted markers exist
+            // if ($availableCount === 0 && empty($extractedBiomarkers) && empty($labReport->markers)) {
+            //     Log::warning("ProcessSenoclockIntegration: available_count is 0. Aborting execution for LabReport #{$labReport->id}");
+            //     $labReport->senoclock_status = 'failed';
+            //     $labReport->save();
+            //     return;
+            // }
 
             // 1. Extract ALL markers from the report
             $extractedMarkers = $labReport->markers ?? [];
@@ -142,11 +145,11 @@ class ProcessSenoclockIntegration implements ShouldQueue
                 $extractedMarkers = $analyzerService->extractSenoclockMarkersWithOpenAi($labReport->ocr_text);
             }
 
-            // Case 3: No matching markers in extraction
-            if (empty($extractedMarkers)) {
-                Log::warning("ProcessSenoclockIntegration: No markers extracted from report. Aborting execution for LabReport #{$labReport->id}");
-                return;
-            }
+            // Case 3: No matching markers in extraction — still continue, do not set status false
+            // if (empty($extractedMarkers)) {
+            //     Log::warning("ProcessSenoclockIntegration: No markers extracted from report. Aborting execution for LabReport #{$labReport->id}");
+            //     return;
+            // }
 
             // 2. Determine "available" markers based on business logic
             $availableKeys = $aiService->getExpectedSenoclockKeys($availableBiomarkers);
@@ -181,17 +184,18 @@ class ProcessSenoclockIntegration implements ShouldQueue
                 'sent_markers' => array_keys($filteredMarkers),
             ]);
 
+            // Generate the report even if biomarkers are missing from the uploaded PDF.
             // APP BUSINESS RULE: Minimum 16 markers required for report generation
-            if ($filteredMarkerCount < 16) {
-                Log::warning('SenoclockService: Insufficient markers for report generation', [
-                    'available_marker_count' => count($availableKeys),
-                    'extracted_marker_count' => count($extractedMarkers),
-                    'filtered_marker_count' => $filteredMarkerCount,
-                    'required_marker_count' => 16,
-                    'sent_markers' => array_keys($filteredMarkers),
-                ]);
-                return; // Stop execution
-            }
+            // if ($filteredMarkerCount < 16) {
+            //     Log::warning('SenoclockService: Insufficient markers for report generation', [
+            //         'available_marker_count' => count($availableKeys),
+            //         'extracted_marker_count' => count($extractedMarkers),
+            //         'filtered_marker_count' => $filteredMarkerCount,
+            //         'required_marker_count' => 16,
+            //         'sent_markers' => array_keys($filteredMarkers),
+            //     ]);
+            //     return; // Stop execution
+            // }
 
             // Fix the Logging to exact acceptance criteria
             Log::info('SenoclockService: Report generation eligibility', [
@@ -222,6 +226,60 @@ class ProcessSenoclockIntegration implements ShouldQueue
 
             // Ensure no later code replaces $filteredMarkers
             $senoclockMarkers = $filteredMarkers;
+
+            // Zero biomarkers: do NOT generate report.
+            if (count($senoclockMarkers) === 0) {
+                Log::warning('ProcessSenoclockIntegration: Zero biomarkers — skipping report generation', [
+                    'lab_report_id' => $labReport->id,
+                ]);
+                $labReport->senoclock_status = 'failed';
+                $labReport->save();
+                return;
+            }
+
+            // SenoClock PDF download requires >= 15 biomarkers (HTTP 409 otherwise).
+            // Abort before execute/download so the queue is not blocked for ~5 minutes.
+            $senoclockMinimum = 15;
+            if ($filteredMarkerCount < $senoclockMinimum) {
+                Log::warning('ProcessSenoclockIntegration: Insufficient markers for SenoClock report — skipping execute/download', [
+                    'lab_report_id' => $labReport->id,
+                    'filtered_marker_count' => $filteredMarkerCount,
+                    'senoclock_minimum_required' => $senoclockMinimum,
+                    'sent_markers' => array_keys($filteredMarkers),
+                    'reason' => 'SenoClock returns HTTP 409 Need minimum of 15 Biomarkers',
+                ]);
+                $labReport->senoclock_status = 'failed';
+                $labReport->save();
+                return;
+            }
+
+            // Drop non-numeric values (e.g. MPV="Normal") — blood age algo rejects them.
+            $invalidMarkers = [];
+            foreach ($senoclockMarkers as $key => $data) {
+                $value = is_array($data) ? ($data['value'] ?? null) : null;
+                if (!is_numeric($value)) {
+                    $invalidMarkers[$key] = $value;
+                    unset($senoclockMarkers[$key]);
+                }
+            }
+            if (!empty($invalidMarkers)) {
+                Log::warning('ProcessSenoclockIntegration: Removed non-numeric markers before SenoClock execute', [
+                    'lab_report_id' => $labReport->id,
+                    'removed' => $invalidMarkers,
+                    'remaining_count' => count($senoclockMarkers),
+                ]);
+            }
+
+            if (count($senoclockMarkers) < $senoclockMinimum) {
+                Log::warning('ProcessSenoclockIntegration: Insufficient numeric markers after cleanup — skipping execute/download', [
+                    'lab_report_id' => $labReport->id,
+                    'numeric_marker_count' => count($senoclockMarkers),
+                    'senoclock_minimum_required' => $senoclockMinimum,
+                ]);
+                $labReport->senoclock_status = 'failed';
+                $labReport->save();
+                return;
+            }
 
             $user = Users::find($labReport->user_id);
             $age = 25;
@@ -281,7 +339,7 @@ class ProcessSenoclockIntegration implements ShouldQueue
                     'response_status' => null, // Note: handled inside executeAlgorithm
                 ]);
                 Log::error("ProcessSenoclockIntegration: Execution failed for LabReport #{$this->labReportId}");
-                $labReport->status = Constants::STATUS_REPORT_FAILED;
+                $labReport->senoclock_status = 'failed';
                 $labReport->save();
                 return;
             }
@@ -301,6 +359,8 @@ class ProcessSenoclockIntegration implements ShouldQueue
 
             if (!$downloadResult['success']) {
                 Log::error("ProcessSenoclockIntegration: PDF download failed", ['error' => $downloadResult['error']]);
+                $labReport->senoclock_status = 'failed';
+                $labReport->save();
                 return;
             }
 

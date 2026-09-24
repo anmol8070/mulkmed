@@ -1177,82 +1177,156 @@
             $report = json_decode(json_encode($report));
         }
 
-        // Try to get from shen_ai first, fallback to report
-        $wellnessScore = getMetricValue($shen_ai->healthIndices->wellnessScore ?? $shen_ai->wellnessScore ?? $report->healthIndices?->wellnessScore ?? 0);
-        $hrvValue = getMetricValue($shen_ai->hrvSdnnMs ?? $shen_ai->hrv_sdnn_ms ?? $report->hrvSdnnMs ?? 0);
-        $bmiValue = getMetricValue($shen_ai->bmi ?? $report->bmi ?? 0);
-        $bmrValue = getMetricValue($shen_ai->healthIndices->basalMetabolicRate ?? $shen_ai->basalMetabolicRate ?? $report->healthIndices?->basalMetabolicRate ?? 0);
-        $tdeeValue = getMetricValue($shen_ai->healthIndices->totalDailyEnergyExpenditure ?? $shen_ai->totalDailyEnergyExpenditure ?? $report->healthIndices?->totalDailyEnergyExpenditure ?? 0);
+        $summaryRows = [];
+        $priorityParameters = $priorityParameters ?? [];
+        if (!empty($priorityParameters) && is_array($priorityParameters)) {
+            $iconMap = [
+                'wellnessScore' => 'wellness.png',
+                'hrvSdnnMs' => 'hrv.png',
+                'bmi' => 'bmi.png',
+                'basalMetabolicRate' => 'bmr.png',
+                'totalDailyEnergyExpenditure' => 'tdee.png',
+                'heartRate' => 'hrv.png',
+                'bloodPressure' => 'hrv.png',
+                'cardiacWorkload' => 'hrv.png',
+                'parasympatheticActivity' => 'hrv.png',
+                'respiratoryRate' => 'wellness.png',
+                'oxygenSaturation' => 'wellness.png',
+                'stressLevel' => 'wellness.png',
+                'vascularAge' => 'wellness.png',
+                'bodyFat' => 'bmi.png',
+            ];
+            $classMap = [
+                'success' => 'status-normal',
+                'warning' => 'status-attention',
+                'danger' => 'status-low',
+            ];
 
-        $pctDev = function ($value, $target) {
-            if (empty($target) || $target == 0) {
-                return '-';
+            foreach ($priorityParameters as $param) {
+                if (!is_array($param)) {
+                    continue;
+                }
+                $key = (string) ($param['key'] ?? '');
+                $status = (string) ($param['status'] ?? 'Normal');
+                $statusClass = $classMap[$param['status_color'] ?? 'success'] ?? 'status-normal';
+                $statusLower = strtolower($status);
+                if (str_contains($statusLower, 'high')) {
+                    $statusClass = 'status-high';
+                } elseif (str_contains($statusLower, 'low')) {
+                    $statusClass = 'status-low';
+                } elseif (str_contains($statusLower, 'attention')) {
+                    $statusClass = 'status-attention';
+                }
+
+                $rawValue = $param['value'] ?? null;
+                if (is_array($rawValue) || is_object($rawValue)) {
+                    $rawValue = null;
+                }
+
+                if ($rawValue === null || $rawValue === '') {
+                    // Missing measurement: keep the row, show a placeholder.
+                    $display = '-';
+                } elseif (!is_numeric($rawValue)) {
+                    // Qualitative results ("Overweight (Pre-obese)", "111 / 74").
+                    $display = (string) $rawValue;
+                } elseif ($key === 'wellnessScore') {
+                    $display = number_format((float) $rawValue, 2);
+                } elseif (in_array($key, ['hrvSdnnMs', 'heartRate', 'respiratoryRate', 'vascularAge'], true)) {
+                    $display = (string) round((float) $rawValue);
+                } elseif ($key === 'bmi') {
+                    $display = number_format((float) $rawValue, 1);
+                } elseif (in_array($key, ['basalMetabolicRate', 'totalDailyEnergyExpenditure'], true)) {
+                    $display = number_format((float) $rawValue, 1) . ' Kcal';
+                } else {
+                    $display = rtrim(rtrim(number_format((float) $rawValue, 2, '.', ''), '0'), '.');
+                }
+
+                $summaryRows[] = [
+                    'icon' => asset('/storage/uploads/' . ($iconMap[$key] ?? 'wellness.png')),
+                    'name' => $param['name'] ?? 'Parameter',
+                    'value' => $display,
+                    'unit' => $param['unit'] ?? '-',
+                    'deviation' => $param['percentage_deviation'] ?? '-',
+                    'status' => [$status, $statusClass],
+                ];
             }
-            $pct = (($value - $target) / $target) * 100;
-            return ($pct >= 0 ? '+' : '') . round($pct) . '%';
-        };
-
-        $wellnessStatus = $wellnessScore >= 70
-            ? ['Normal', 'status-normal']
-            : ($wellnessScore >= 45 ? ['Needs Attention', 'status-attention'] : ['Low', 'status-low']);
-
-        $hrvStatus = $hrvValue >= 70
-            ? ['Normal', 'status-normal']
-            : ['Low', 'status-low'];
-
-        if ($bmiValue >= 18.5 && $bmiValue <= 24.9) {
-            $bmiStatus = ['Normal', 'status-normal'];
-        } elseif ($bmiValue > 24.9) {
-            $bmiStatus = ['High', 'status-high'];
-        } else {
-            $bmiStatus = ['Low', 'status-low'];
         }
 
-        $bmrStatus = ['Normal', 'status-normal'];
-        $tdeeStatus = ['Normal', 'status-normal'];
+        if (empty($summaryRows)) {
+            // Fallback when controller did not pass priorityParameters
+            $wellnessScore = getMetricValue($shen_ai->healthIndices->wellnessScore ?? $shen_ai->wellnessScore ?? $report->healthIndices?->wellnessScore ?? 0);
+            $hrvValue = getMetricValue($shen_ai->hrvSdnnMs ?? $shen_ai->hrv_sdnn_ms ?? $report->hrvSdnnMs ?? 0);
+            $bmiValue = getMetricValue($shen_ai->bmi ?? $report->bmi ?? 0);
+            $bmrValue = getMetricValue($shen_ai->healthIndices->basalMetabolicRate ?? $shen_ai->basalMetabolicRate ?? $report->healthIndices?->basalMetabolicRate ?? 0);
+            $tdeeValue = getMetricValue($shen_ai->healthIndices->totalDailyEnergyExpenditure ?? $shen_ai->totalDailyEnergyExpenditure ?? $report->healthIndices?->totalDailyEnergyExpenditure ?? 0);
 
-        $summaryRows = [
-            [
-                'icon' => asset('/storage/uploads/wellness.png'),
-                'name' => 'Wellness Score',
-                'value' => number_format($wellnessScore, 2),
-                'unit' => '-',
-                'deviation' => $pctDev($wellnessScore, 47.5),
-                'status' => $wellnessStatus,
-            ],
-            [
-                'icon' => asset('/storage/uploads/hrv.png'),
-                'name' => 'HRV (Heart Rate Variability)',
-                'value' => round($hrvValue),
-                'unit' => 'ms',
-                'deviation' => $pctDev($hrvValue, 74),
-                'status' => $hrvStatus,
-            ],
-            [
-                'icon' => asset('/storage/uploads/bmi.png'),
-                'name' => 'BMI',
-                'value' => number_format($bmiValue, 1),
-                'unit' => '-',
-                'deviation' => $pctDev($bmiValue, 25),
-                'status' => $bmiStatus,
-            ],
-            [
-                'icon' => asset('/storage/uploads/bmr.png'),
-                'name' => 'BMR (Kcal)',
-                'value' => number_format($bmrValue, 1) . ' Kcal',
-                'unit' => 'Kcal',
-                'deviation' => $pctDev($bmrValue, 1335),
-                'status' => $bmrStatus,
-            ],
-            [
-                'icon' => asset('/storage/uploads/tdee.png'),
-                'name' => 'TDEE (Kcal)',
-                'value' => number_format($tdeeValue, 1) . ' Kcal',
-                'unit' => 'Kcal',
-                'deviation' => $pctDev($tdeeValue, 1805),
-                'status' => $tdeeStatus,
-            ],
-        ];
+            $pctDev = function ($value, $target) {
+                if (empty($target) || $target == 0) {
+                    return '-';
+                }
+                $pct = (($value - $target) / $target) * 100;
+                return ($pct >= 0 ? '+' : '') . round($pct) . '%';
+            };
+
+            $wellnessStatus = $wellnessScore >= 70
+                ? ['Normal', 'status-normal']
+                : ($wellnessScore >= 45 ? ['Needs Attention', 'status-attention'] : ['Low', 'status-low']);
+
+            $hrvStatus = $hrvValue >= 70
+                ? ['Normal', 'status-normal']
+                : ['Low', 'status-low'];
+
+            if ($bmiValue >= 18.5 && $bmiValue <= 24.9) {
+                $bmiStatus = ['Normal', 'status-normal'];
+            } elseif ($bmiValue > 24.9) {
+                $bmiStatus = ['High', 'status-high'];
+            } else {
+                $bmiStatus = ['Low', 'status-low'];
+            }
+
+            $summaryRows = [
+                [
+                    'icon' => asset('/storage/uploads/wellness.png'),
+                    'name' => 'Wellness Score',
+                    'value' => number_format($wellnessScore, 2),
+                    'unit' => '-',
+                    'deviation' => $pctDev($wellnessScore, 47.5),
+                    'status' => $wellnessStatus,
+                ],
+                [
+                    'icon' => asset('/storage/uploads/hrv.png'),
+                    'name' => 'HRV (Heart Rate Variability)',
+                    'value' => round($hrvValue),
+                    'unit' => 'ms',
+                    'deviation' => $pctDev($hrvValue, 74),
+                    'status' => $hrvStatus,
+                ],
+                [
+                    'icon' => asset('/storage/uploads/bmi.png'),
+                    'name' => 'BMI',
+                    'value' => number_format($bmiValue, 1),
+                    'unit' => '-',
+                    'deviation' => $pctDev($bmiValue, 25),
+                    'status' => $bmiStatus,
+                ],
+                [
+                    'icon' => asset('/storage/uploads/bmr.png'),
+                    'name' => 'BMR (Kcal)',
+                    'value' => number_format($bmrValue, 1) . ' Kcal',
+                    'unit' => 'Kcal',
+                    'deviation' => $pctDev($bmrValue, 1335),
+                    'status' => ['Normal', 'status-normal'],
+                ],
+                [
+                    'icon' => asset('/storage/uploads/tdee.png'),
+                    'name' => 'TDEE (Kcal)',
+                    'value' => number_format($tdeeValue, 1) . ' Kcal',
+                    'unit' => 'Kcal',
+                    'deviation' => $pctDev($tdeeValue, 1805),
+                    'status' => ['Normal', 'status-normal'],
+                ],
+            ];
+        }
     @endphp
 
     <div class="header">

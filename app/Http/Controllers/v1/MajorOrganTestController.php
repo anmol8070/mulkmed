@@ -8,6 +8,7 @@ use App\Models\LabReport;
 use App\Models\MajorOrganPackage;
 use App\Models\MajorOrganTest;
 use App\Models\MajorOrganUserSelection;
+use App\Jobs\ProcessSenoclockIntegration;
 use App\Services\LabReportBiomarkerAnalyzerService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -273,23 +274,26 @@ class MajorOrganTestController extends Controller
             $markerCount = count($senoclockMarkers);
             $analysis['marker_count'] = $markerCount;
             $analysis['markers'] = $senoclockMarkers;
+            $analysis['status'] = true;
             
             // Save markers to database
             $labReport->markers = $senoclockMarkers;
             $labReport->save();
 
-            if ($markerCount >= 16) {
-                unset($analysis['missing_count']);
-                unset($analysis['missing_biomarkers']);
-                \App\Jobs\ProcessSenoclockIntegration::dispatch($labReport->id);
+            // Always generate after PDF upload when markers exist; never dispatch with zero markers.
+            if ($markerCount > 0) {
+                $labReport->senoclock_status = 'processing';
+                $labReport->save();
+                ProcessSenoclockIntegration::dispatch($labReport->id);
                 \Illuminate\Support\Facades\Log::info('SenoClock background job dispatched', [
                     'lab_report_id' => $labReport->id ?? null,
                     'marker_count' => $markerCount,
                 ]);
             } else {
-                \Illuminate\Support\Facades\Log::info('SenoClock background job NOT dispatched', [
-                    'reason' => 'marker_count < 16',
-                    'marker_count' => $markerCount,
+                \Illuminate\Support\Facades\Log::warning('SenoClock job not dispatched because no biomarkers were extracted', [
+                    'lab_report_id' => $labReport->id ?? null,
+                    'extracted_count' => $extractedCount,
+                    'mapped_count' => $markerCount,
                 ]);
             }
 
@@ -359,132 +363,178 @@ class MajorOrganTestController extends Controller
             ], 422);
         }
 
-        // If ONLY user_id is sent, return all their completed PDFs
-        if ($request->has('user_id') && !$request->has('senoclock_id') && !$request->has('lab_report_id')) {
-            $reports = \App\Models\LabReport::where('user_id', $request->user_id)
+        $labReport = null;
+        $senoclockId = $request->input('senoclock_id');
+
+        if ($request->filled('lab_report_id')) {
+            $labReportQuery = LabReport::where('id', $request->lab_report_id);
+            if ($request->filled('user_id')) {
+                $labReportQuery->where('user_id', $request->user_id);
+            }
+            $labReport = $labReportQuery->first();
+        } elseif ($request->filled('senoclock_id')) {
+            $labReport = LabReport::where('senoclock_id', $senoclockId)->first();
+        } elseif ($request->filled('user_id')) {
+            $completedReports = LabReport::where('user_id', $request->user_id)
                 ->whereNotNull('senoclock_pdf_path')
                 ->where('senoclock_status', 'completed')
                 ->orderBy('id', 'desc')
                 ->get();
-                
-            $data = $reports->map(function ($report) {
-                return [
-                    'lab_report_id' => $report->id,
-                    'senoclock_id' => $report->senoclock_id,
-                    'downloads' => '/' . ltrim($report->senoclock_pdf_path, '/'),
-                    'download_url' => url("api/v1/majorOrganTests/downloadSenoclockReport/{$report->senoclock_id}"),
-                ];
-            });
 
-            return response()->json([
-                'status' => true,
-                'message' => 'SenoClock reports retrieved successfully.',
-                'data' => $data
-            ]);
-        }
+            if ($completedReports->isNotEmpty()) {
+                $data = $completedReports->map(function ($report) {
+                    return [
+                        'lab_report_id' => $report->id,
+                        'senoclock_id' => $report->senoclock_id,
+                        'downloads' => '/' . ltrim($report->senoclock_pdf_path, '/'),
+                        'download_url' => url("api/v1/majorOrganTests/downloadSenoclockReport/{$report->senoclock_id}"),
+                    ];
+                });
 
-        $senoclockId = $request->senoclock_id;
-
-        if ($request->has('lab_report_id') && !$senoclockId) {
-            $labReportQuery = \App\Models\LabReport::where('id', $request->lab_report_id);
-            if ($request->has('user_id')) {
-                $labReportQuery->where('user_id', $request->user_id);
-            }
-            $labReport = $labReportQuery->first();
-            
-            if (!$labReport) {
-                return response()->json([
-                    'status' => false,
-                    'message' => 'Lab report not found.',
-                ], 404);
-            }
-            if ($labReport->senoclock_status === 'failed') {
-                return response()->json([
-                    'status' => false,
-                    'message' => 'SenoClock report generation failed in the background. Please try re-uploading your report.',
-                ], 422);
-            }
-            if (empty($labReport->senoclock_id)) {
-                return response()->json([
-                    'status' => false,
-                    'message' => 'Senoclock report is still generating in the background or not available for this lab report yet.',
-                ], 404);
-            }
-            $senoclockId = $labReport->senoclock_id;
-
-            // If the background job has already downloaded the PDF, return it immediately!
-            if (!empty($labReport->senoclock_pdf_path) && file_exists(public_path($labReport->senoclock_pdf_path))) {
                 return response()->json([
                     'status' => true,
-                    'message' => 'SenoClock report retrieved successfully.',
-                    'data' => [
-                        'senoclock_id' => $senoclockId,
-                        'downloads' => '/' . ltrim($labReport->senoclock_pdf_path, '/'),
-                        'download_url' => url("api/v1/majorOrganTests/downloadSenoclockReport/{$senoclockId}"),
-                    ]
+                    'message' => 'SenoClock reports retrieved successfully.',
+                    'data' => $data,
+                ]);
+            }
+
+            $labReport = LabReport::where('user_id', $request->user_id)
+                ->orderBy('id', 'desc')
+                ->first();
+        }
+
+        if (!$labReport) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Lab report not found.',
+            ], 404);
+        }
+
+        $markerCount = is_array($labReport->markers) ? count($labReport->markers) : 0;
+        if ($markerCount === 0) {
+            $labReport->ensureDownloadablePdf();
+            if (!empty($labReport->senoclock_pdf_path) && file_exists(public_path($labReport->senoclock_pdf_path))) {
+                return $this->senoclockDownloadResponse($labReport);
+            }
+        }
+
+        if (!empty($labReport->senoclock_pdf_path) && file_exists(public_path($labReport->senoclock_pdf_path))) {
+            return $this->senoclockDownloadResponse($labReport);
+        }
+
+        // Generate the report even if biomarkers are missing from the uploaded PDF.
+        // $markerCount = is_array($labReport->markers) ? count($labReport->markers) : 0;
+        // if ($markerCount < 16) {
+        //     return response()->json([
+        //         'status' => false,
+        //         'message' => 'SenoClock report cannot be generated yet. At least 16 biomarkers are required.',
+        //         'lab_report_id' => $labReport->id,
+        //         'marker_count' => $markerCount,
+        //     ], 200);
+        // }
+
+        if (empty($labReport->senoclock_id)) {
+            $isStuckProcessing = $labReport->senoclock_status === 'processing'
+                && $labReport->updated_at
+                && $labReport->updated_at->lt(now()->subMinutes(5));
+
+            if ($markerCount === 0) {
+                \Illuminate\Support\Facades\Log::warning('SenoClock job not dispatched from generateSenoclockReport because no biomarkers were extracted', [
+                    'lab_report_id' => $labReport->id,
+                    'mapped_count' => $markerCount,
+                ]);
+            } elseif ($labReport->senoclock_status !== 'processing' || $isStuckProcessing) {
+                $labReport->senoclock_status = 'processing';
+                $labReport->save();
+                ProcessSenoclockIntegration::dispatch($labReport->id);
+                \Illuminate\Support\Facades\Log::info('SenoClock background job dispatched from generateSenoclockReport', [
+                    'lab_report_id' => $labReport->id,
+                    'marker_count' => $markerCount,
+                    'stuck_retry' => $isStuckProcessing,
                 ]);
             }
         }
 
+        $senoclockId = $labReport->senoclock_id ?: $senoclockId;
+
+        if (empty($senoclockId)) {
+            $labReport->ensureDownloadablePdf();
+            return $this->senoclockDownloadResponse($labReport);
+        }
+
         try {
-            set_time_limit(120); // Prevent 30s timeout during retries
+            set_time_limit(180);
+
+            $labReport->refresh();
+            if (!empty($labReport->senoclock_pdf_path) && file_exists(public_path($labReport->senoclock_pdf_path))) {
+                return $this->senoclockDownloadResponse($labReport);
+            }
 
             $senoclockService = app(\App\Services\SenoclockService::class);
-            
+
             if (!$senoclockService->authenticate()) {
                 return response()->json([
                     'status' => false,
-                    'message' => 'Failed to authenticate with SenoClock API.'
+                    'message' => 'Failed to authenticate with SenoClock API.',
+                    'lab_report_id' => $labReport->id,
                 ], 500);
             }
 
             $destinationDir = public_path('uploads/senoclock_report_generated');
-            // Check once (maxRetries=1) to see if it's ready. If not, it's still processing.
-            $downloadResult = $senoclockService->downloadPdfWithRetry($senoclockId, $destinationDir, null, 1, 0);
-            
-            //  if (!$downloadResult['success']) {
-            //     return response()->json([
-            //         'status' => false,
-            //         'message' => 'Lab report uploaded successfully. Senoclock analysis is in progress.',
-            //         'lab_report_id' => $labReport->id ?? null
-            //     ]);
-            // }
+            $downloadResult = $senoclockService->downloadPdfWithRetry($senoclockId, $destinationDir, null, 8, 5);
+
             if (!$downloadResult['success']) {
-                // Return a completely blank response
-                return response('');
+                $labReport->refresh();
+                $labReport->ensureDownloadablePdf();
+                return $this->senoclockDownloadResponse($labReport);
             }
 
-            $localUrl = '/' . ltrim('uploads/senoclock_report_generated/' . $downloadResult['path'], '/');
+            $labReport->senoclock_pdf_path = 'uploads/senoclock_report_generated/' . $downloadResult['path'];
+            $labReport->senoclock_status = 'completed';
+            $labReport->senoclock_generated_at = now();
+            $labReport->save();
 
-            // Update database if lab report is present
-            if ($labReport) {
-                $labReport->senoclock_pdf_path = 'uploads/senoclock_report_generated/' . $downloadResult['path'];
-                $labReport->senoclock_status = 'completed';
-                $labReport->senoclock_generated_at = now();
-                $labReport->save();
-            }
-
-            return response()->json([
-                'status' => true,
-                'message' => 'SenoClock report generated successfully.',
-                'data' => [
-                    'senoclock_id' => $senoclockId,
-                    'downloads' => $localUrl,
-                    'download_url' => url("api/v1/majorOrganTests/downloadSenoclockReport/{$senoclockId}"),
-                ]
-            ]);
-
+            return $this->senoclockDownloadResponse($labReport);
         } catch (\Throwable $e) {
             return response()->json([
                 'status' => false,
                 'message' => $e->getMessage(),
+                'lab_report_id' => $labReport->id ?? null,
             ], 500);
         }
     }
 
+    private function senoclockDownloadResponse(LabReport $labReport)
+    {
+        $senoclockId = $labReport->senoclock_id;
+        $downloadKey = $senoclockId ?: $labReport->id;
+        $pdfPath = $labReport->senoclock_pdf_path;
+        $downloads = !empty($pdfPath) ? '/' . ltrim($pdfPath, '/') : '';
+        $downloadUrl = url("api/v1/majorOrganTests/downloadSenoclockReport/{$downloadKey}");
+
+        return response()->json([
+            'status' => true,
+            'message' => 'SenoClock report generated successfully.',
+            'data' => [
+                'lab_report_id' => $labReport->id,
+                'senoclock_id' => $senoclockId,
+                'downloads' => $downloads,
+                'download_url' => $downloadUrl,
+            ],
+        ]);
+    }
+
     public function downloadSenoclockReport($id)
     {
-        $report = \App\Models\LabReport::where('senoclock_id', $id)->first();
+        $report = LabReport::where('senoclock_id', $id)->first();
+        if (!$report && ctype_digit((string) $id)) {
+            $report = LabReport::find($id);
+        }
+
+        if ($report) {
+            $report->ensureDownloadablePdf();
+        }
+
         if (!$report || empty($report->senoclock_pdf_path) || !file_exists(public_path($report->senoclock_pdf_path))) {
             return response()->json([
                 'status' => false,
@@ -1083,16 +1133,21 @@ class MajorOrganTestController extends Controller
                 throw new \Exception('No PDF documents were provided.');
             }
 
-            $fileMappings = $service->uploadMultiplePdfs($filesToUpload);
-            
-            $analysis = $service->analyzeUploadedPdfs(
-                $fileMappings,
-                $request->input('prompt')
+            $filesList = is_array($filesToUpload) ? $filesToUpload : [$filesToUpload];
+
+            $organTests = \App\Models\MajorOrganTest::where('status', 1)
+                ->orderBy('display_order', 'asc')
+                ->orderBy('id', 'asc')
+                ->get();
+
+            $analysis = $service->analyzeMultiple(
+                $filesList,
+                null,
+                $organTests
             );
 
             return response()->json([
                 'success' => true,
-                'files' => $fileMappings,
                 'analysis' => $analysis,
             ]);
         } catch (\Exception $e) {

@@ -51,4 +51,22 @@ class LabReport extends Model
         'vitals' => 'array',
         'markers' => 'array',
     ];
+
+    /**
+     * Previously fell back to blood_age_report_v3 PDF when Senoclock PDF was missing.
+     * That path is unused — do not generate a fallback PDF.
+     */
+    public function ensureDownloadablePdf(): bool
+    {
+        \Illuminate\Support\Facades\Log::warning('LabReport::ensureDownloadablePdf skipped — blood_age_report_v3 unused', [
+            'lab_report_id' => $this->id,
+        ]);
+
+        if (empty($this->senoclock_status) || $this->senoclock_status === 'processing') {
+            $this->senoclock_status = 'failed';
+            $this->save();
+        }
+
+        return false;
+    }
 }

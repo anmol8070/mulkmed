@@ -69,6 +69,7 @@ class LabReportBiomarkerAnalyzerService
 
         Log::info('Starting native PDF analysis');
 
+        $pdfFiles = array_values($pdfFiles);
         $uploadedFiles = $this->uploadMultiplePdfs($pdfFiles);
 
         Log::info('Multi-PDF extraction validation', [
@@ -82,38 +83,44 @@ class LabReportBiomarkerAnalyzerService
         ]);
 
         $prompt = <<<PROMPT
-You are analyzing a laboratory PDF document.
+You are analyzing a laboratory PDF document attached as input_file.
 
-Analyze the ENTIRE PDF.
-Read every page.
-Extract EVERY laboratory biomarker/test present.
+Analyze the ENTIRE uploaded PDF.
+Read every page of the attached PDF.
+Extract ALL laboratory biomarkers/results present in the document.
+Do not stop after finding the first section.
+Do not assume a fixed number of biomarkers.
+Do not return an empty biomarkers array if readable laboratory data exists in the PDF.
 Do not stop after finding common biomarkers.
 Do not return only biomarkers relevant to SenoClock.
 Do not return only biomarkers matching the database.
 Do not summarize the report.
 Do not select a subset.
 Preserve every biomarker found.
-Include biomarker name.
-Include value.
-Include unit.
-Include reference range.
-Include source_document.
+
+For each biomarker include:
+- name: original biomarker/test name exactly as shown
+- value: exact result value as a string (preserve formatting, decimals, commas)
+- unit: exact unit as a string (empty string if none)
+- range: exact reference/normal range as a string (empty string if none)
+- source_document: the PDF filename
+
+Preserve values exactly as displayed. Do not calculate or modify values. Do not invent missing values.
+If a value is visually present, extract it exactly.
 If multiple biomarkers occur on different pages, include all of them.
-Never omit a biomarker because another PDF contains the same biomarker.
 Duplicate biomarkers across documents must remain identifiable by source_document.
 
 Return ONLY valid JSON.
 
 Required structure:
-
 {
   "biomarkers": [
     {
       "name": "Hemoglobin (Hb)",
-      "value": 14.2,
+      "value": "14.2",
       "unit": "g/dL",
       "range": "13.0 - 17.0",
-      "source_document": "allbiomarkers.pdf"
+      "source_document": "allbiomarkers1.pdf"
     }
   ]
 }
@@ -130,9 +137,10 @@ PROMPT;
         $documentSummaries = [];
         $documentResults = [];
 
-        foreach ($uploadedFiles as $uploadedFile) {
+        foreach ($uploadedFiles as $index => $uploadedFile) {
             try {
-                $biomarkers = $this->analyzeSingleUploadedPdf($uploadedFile, $prompt);
+                $localFile = $pdfFiles[$index] ?? null;
+                $biomarkers = $this->analyzeSingleUploadedPdf($uploadedFile, $prompt, $localFile);
                 
                 $allExtractedBiomarkers = array_merge($allExtractedBiomarkers, $biomarkers);
                 
@@ -298,6 +306,7 @@ PROMPT;
     {
         $mime = $file->getMimeType() ?: '';
         $extension = strtolower($file->getClientOriginalExtension() ?: '');
+        $realPath = $file->getRealPath();
         
         $isPdf = str_contains($mime, 'pdf') || $extension === 'pdf';
         $isImage = in_array($extension, ['jpg', 'jpeg', 'png']) || str_starts_with($mime, 'image/');
@@ -311,14 +320,39 @@ PROMPT;
             throw new \RuntimeException('OpenAI API key is missing.');
         }
 
+        Log::info('PDF input validation', [
+            'filename' => $file->getClientOriginalName(),
+            'path_exists' => is_file($realPath),
+            'size_bytes' => $file->getSize(),
+            'mime_type' => $mime,
+            'extension' => $extension,
+            'readable' => is_readable($realPath),
+        ]);
+
         Log::info('Uploading PDF: ' . $file->getClientOriginalName());
+
+        $fileBytes = @file_get_contents($realPath);
+        $byteLength = is_string($fileBytes) ? strlen($fileBytes) : 0;
+
+        Log::info('OpenAI PDF upload bytes', [
+            'filename' => $file->getClientOriginalName(),
+            'bytes' => $byteLength,
+            'mime' => $mime,
+        ]);
+
+        if ($byteLength < 100) {
+            throw new \RuntimeException('Failed to upload PDF: file is empty or unreadable.');
+        }
+
+        $contentType = $isPdf ? 'application/pdf' : ($mime ?: 'application/octet-stream');
 
         try {
             $response = $this->openAiHttpClient($apiKey)
                 ->attach(
                     'file',
-                    file_get_contents($file->getRealPath()),
-                    $file->getClientOriginalName()
+                    $fileBytes,
+                    $file->getClientOriginalName(),
+                    ['Content-Type' => $contentType]
                 )
                 ->post('https://api.openai.com/v1/files', [
                     'purpose' => 'user_data',
@@ -328,7 +362,7 @@ PROMPT;
         }
 
         if (!$response->successful()) {
-            throw new \RuntimeException('Failed to upload PDF: ' . $file->getClientOriginalName() . '. Status: ' . $response->status());
+            throw new \RuntimeException('Failed to upload PDF: ' . $file->getClientOriginalName() . '. Status: ' . $response->status() . ' Body: ' . mb_substr($response->body(), 0, 300));
         }
 
         $responseData = $response->json();
@@ -338,10 +372,19 @@ PROMPT;
             throw new \RuntimeException('Failed to upload PDF: ' . $file->getClientOriginalName() . '. OpenAI did not return a file_id.');
         }
 
-        Log::info('OpenAI file uploaded:', [
+        Log::info('OpenAI file upload validation', [
             'filename' => $file->getClientOriginalName(),
             'file_id' => $fileId,
+            'purpose' => 'user_data',
+            'http_status' => $response->status(),
+            'openai_status' => $responseData['status'] ?? null,
+            'openai_bytes' => $responseData['bytes'] ?? null,
+            'openai_filename' => $responseData['filename'] ?? null,
+            'api_key_fingerprint' => $this->openAiKeyFingerprint($apiKey),
         ]);
+
+        // Wait until OpenAI finishes processing the PDF (text + page images).
+        $this->waitForOpenAiFileProcessed($apiKey, $fileId, $file->getClientOriginalName());
 
         return [
             'original_name' => $file->getClientOriginalName(),
@@ -349,68 +392,315 @@ PROMPT;
         ];
     }
 
-    public function analyzeSingleUploadedPdf(array $uploadedFile, string $prompt): array
+    /**
+     * Poll Files API until status is processed (or timeout).
+     */
+    protected function waitForOpenAiFileProcessed(string $apiKey, string $fileId, string $filename, int $maxSeconds = 60): void
+    {
+        $deadline = time() + $maxSeconds;
+        $lastStatus = null;
+
+        while (time() < $deadline) {
+            try {
+                $response = $this->openAiHttpClient($apiKey)
+                    ->timeout(30)
+                    ->get('https://api.openai.com/v1/files/' . $fileId);
+
+                if ($response->successful()) {
+                    $data = $response->json();
+                    $lastStatus = $data['status'] ?? null;
+                    Log::info('OpenAI file status check', [
+                        'filename' => $filename,
+                        'file_id' => $fileId,
+                        'status' => $lastStatus,
+                        'bytes' => $data['bytes'] ?? null,
+                    ]);
+
+                    if ($lastStatus === 'processed') {
+                        return;
+                    }
+                    if (in_array($lastStatus, ['error', 'failed'], true)) {
+                        throw new \RuntimeException("OpenAI file processing failed for {$filename} (status={$lastStatus}).");
+                    }
+                }
+            } catch (\RuntimeException $e) {
+                throw $e;
+            } catch (\Throwable $e) {
+                Log::warning('OpenAI file status poll error', [
+                    'file_id' => $fileId,
+                    'message' => $e->getMessage(),
+                ]);
+            }
+
+            usleep(750000); // 0.75s
+        }
+
+        Log::warning('OpenAI file still not processed after wait — continuing anyway', [
+            'filename' => $filename,
+            'file_id' => $fileId,
+            'last_status' => $lastStatus,
+        ]);
+    }
+
+    /**
+     * Non-secret fingerprint so Files + Responses calls can be confirmed on the same key.
+     */
+    protected function openAiKeyFingerprint(?string $apiKey): ?string
+    {
+        if ($apiKey === null || $apiKey === '') {
+            return null;
+        }
+
+        return substr(hash('sha256', $apiKey), 0, 12);
+    }
+
+    /**
+     * Safe diagnostics for Responses PDF/image calls. Never logs keys or file bytes/base64.
+     */
+    protected function logResponsesApiDiagnostics(
+        string $stage,
+        string $endpoint,
+        array $payload,
+        $response = null,
+        ?array $responseData = null,
+        ?string $apiKey = null
+    ): void {
+        $content = data_get($payload, 'input.0.content', []);
+        if (!is_array($content)) {
+            $content = [];
+        }
+
+        $inputParts = [];
+        foreach ($content as $part) {
+            if (!is_array($part)) {
+                continue;
+            }
+            $type = (string) ($part['type'] ?? 'unknown');
+            $meta = ['type' => $type];
+            if ($type === 'input_file') {
+                $meta['file_id'] = $part['file_id'] ?? null;
+                $meta['filename'] = $part['filename'] ?? null;
+                $meta['detail'] = $part['detail'] ?? null;
+                $meta['file_data_present'] = isset($part['file_data']) && is_string($part['file_data']) && $part['file_data'] !== '';
+                $meta['file_data_chars'] = $meta['file_data_present'] ? strlen((string) $part['file_data']) : 0;
+            } elseif ($type === 'input_image') {
+                $meta['detail'] = $part['detail'] ?? null;
+                $imageUrl = (string) ($part['image_url'] ?? '');
+                $meta['image_url_present'] = $imageUrl !== '';
+                $meta['image_url_chars'] = strlen($imageUrl);
+                $meta['image_is_data_uri'] = str_starts_with($imageUrl, 'data:');
+            } elseif ($type === 'input_text') {
+                $meta['prompt_length'] = strlen((string) ($part['text'] ?? ''));
+            }
+            $inputParts[] = $meta;
+        }
+
+        $responseData = $responseData ?? (($response && method_exists($response, 'json')) ? ($response->json() ?? []) : []);
+        $outputItems = is_array($responseData['output'] ?? null) ? $responseData['output'] : [];
+        $outputItemTypes = [];
+        foreach ($outputItems as $item) {
+            $outputItemTypes[] = is_array($item) ? ($item['type'] ?? 'unknown') : gettype($item);
+        }
+
+        Log::info('Responses API diagnostic', [
+            'stage' => $stage,
+            'endpoint' => $endpoint,
+            'model' => $payload['model'] ?? null,
+            'api_key_fingerprint' => $this->openAiKeyFingerprint($apiKey),
+            'text_format' => data_get($payload, 'text.format.type'),
+            'input_structure' => [
+                'message_count' => count($payload['input'] ?? []),
+                'role' => data_get($payload, 'input.0.role'),
+                'content_part_count' => count($content),
+                'content_parts' => $inputParts,
+            ],
+            'http_status' => $response && method_exists($response, 'status') ? $response->status() : null,
+            'response_id' => $responseData['id'] ?? null,
+            'response_status' => $responseData['status'] ?? null,
+            'incomplete_details' => $responseData['incomplete_details'] ?? null,
+            'error' => $responseData['error'] ?? null,
+            'warnings' => $responseData['warnings'] ?? null,
+            'usage_input_tokens' => data_get($responseData, 'usage.input_tokens'),
+            'usage_output_tokens' => data_get($responseData, 'usage.output_tokens'),
+            'usage_total_tokens' => data_get($responseData, 'usage.total_tokens'),
+            'output_item_count' => count($outputItems),
+            'output_item_types' => $outputItemTypes,
+            'output_text_length' => strlen($this->extractResponsesOutputText($responseData)),
+            'output_preview' => mb_substr($this->extractResponsesOutputText($responseData), 0, 300, 'UTF-8'),
+            'pdf_likely_missing' => ((int) data_get($responseData, 'usage.input_tokens', 0)) > 0
+                && ((int) data_get($responseData, 'usage.input_tokens', 0)) < 800,
+        ]);
+    }
+
+    protected function isPdfContentMissingFromModel(int $inputTokens, array $biomarkers): bool
+    {
+        return empty($biomarkers) || ($inputTokens > 0 && $inputTokens < 800);
+    }
+
+    public function analyzeSingleUploadedPdf(array $uploadedFile, string $prompt, ?UploadedFile $localFile = null): array
     {
         $apiKey = config('services.openai.api_key');
-        
-        $contents = [
-            [
-                'type' => 'input_text',
-                'text' => $prompt,
-            ],
-            [
-                'type' => 'input_file',
-                'file_id' => $uploadedFile['file_id'],
-            ]
-        ];
+        $filename = $uploadedFile['original_name'] ?? 'unknown';
+        $fileId = $uploadedFile['file_id'] ?? null;
+        // Vision-capable PDF model (page images). Do not use gpt-4o-mini for this path.
+        $pdfModel = config('services.openai.pdf_model', 'gpt-4o');
 
         Log::info('Starting individual PDF analysis', [
-            'filename' => $uploadedFile['original_name'] ?? 'unknown',
-            'file_id' => $uploadedFile['file_id'],
+            'filename' => $filename,
+            'file_id' => $fileId,
+            'model' => $pdfModel,
+            'api_key_fingerprint' => $this->openAiKeyFingerprint($apiKey),
+            'has_local_file' => $localFile ? is_file($localFile->getRealPath()) : false,
         ]);
 
+        // NOTE: Do NOT force text.format=json_object for PDF inputs.
+        // Structured JSON mode + scanned/image-only PDFs frequently yields prompt-only
+        // token counts (~400) and empty biomarker arrays while still returning HTTP 200.
         $payload = [
-            'model' => config('services.openai.model', 'gpt-4o'),
+            'model' => $pdfModel,
             'input' => [
                 [
                     'role' => 'user',
-                    'content' => $contents,
+                    'content' => [
+                        [
+                            'type' => 'input_file',
+                            'file_id' => $fileId,
+                        ],
+                        [
+                            'type' => 'input_text',
+                            'text' => $prompt . "\n\nsource_document must be: {$filename}\nThe laboratory PDF is attached as input_file. You MUST read every page. Never return an empty biomarkers array if lab values are visible in the PDF.\nReturn ONLY valid JSON.",
+                        ],
+                    ],
                 ],
             ],
         ];
 
-        $response = $this->openAiHttpClient($apiKey)
-            ->post('https://api.openai.com/v1/responses', $payload);
-
-        $responseData = $response->json();
-        
-        Log::info('OpenAI Responses API completed for individual PDF', [
-            'filename' => $uploadedFile['original_name'] ?? 'unknown',
-            'file_id' => $uploadedFile['file_id'],
-            'response_id' => $responseData['id'] ?? null,
-            'status' => $responseData['status'] ?? null,
+        Log::info('Responses API request validation', [
+            'filename' => $filename,
+            'file_id' => $fileId,
+            'upload_file_id' => $fileId,
+            'file_id_matches_upload' => true,
+            'model' => $pdfModel,
+            'input_file_type' => 'input_file',
+            'detail' => null,
+            'text_format' => null,
+            'prompt_chars' => strlen($prompt),
+            'api_key_fingerprint' => $this->openAiKeyFingerprint($apiKey),
         ]);
 
+        $this->logResponsesApiDiagnostics('request_file_id', 'https://api.openai.com/v1/responses', $payload, null, null, $apiKey);
+
+        $response = $this->openAiHttpClient($apiKey)
+            ->asJson()
+            ->timeout(300)
+            ->post('https://api.openai.com/v1/responses', $payload);
+
+        $responseData = $response->json() ?? [];
+        $inputTokens = (int) data_get($responseData, 'usage.input_tokens', 0);
+        $this->logResponsesApiDiagnostics('response_file_id', 'https://api.openai.com/v1/responses', $payload, $response, $responseData, $apiKey);
+
+        $biomarkers = [];
         if (!$response->successful()) {
             Log::error('OpenAI Responses API failed for individual PDF', [
-                'filename' => $uploadedFile['original_name'] ?? 'unknown',
-                'file_id' => $uploadedFile['file_id'],
+                'filename' => $filename,
+                'file_id' => $fileId,
                 'status' => $response->status(),
-                'body' => $response->body(),
+                'body' => mb_substr($response->body(), 0, 500),
             ]);
+            // Keep going into inline/page-image fallbacks when a local PDF is available.
+            if (!$localFile || !is_file($localFile->getRealPath())) {
             throw new \RuntimeException('OpenAI Responses API failed with status ' . $response->status());
+            }
+        } else {
+            $biomarkers = $this->parseBiomarkersFromResponsesPayload($responseData, $filename, $fileId);
         }
 
+        Log::info('Parsed biomarker count after Responses API', [
+            'filename' => $filename,
+            'file_id' => $fileId,
+            'biomarker_count' => count($biomarkers),
+            'input_tokens' => $inputTokens,
+            'extraction_failed_low_tokens' => $this->isPdfContentMissingFromModel($inputTokens, $biomarkers),
+        ]);
+
+        if ($this->isPdfContentMissingFromModel($inputTokens, $biomarkers) && $localFile && is_file($localFile->getRealPath())) {
+            Log::warning('Empty/low-token biomarkers from file_id analysis — retrying inline PDF base64', [
+                'filename' => $filename,
+                'file_id' => $fileId,
+                'input_tokens' => $inputTokens,
+                'biomarker_count' => count($biomarkers),
+            ]);
+            $biomarkers = $this->analyzePdfWithInlineBase64($localFile, $prompt, $apiKey);
+            Log::info('Inline base64 fallback result', [
+                'filename' => $filename,
+                'biomarker_count' => count($biomarkers),
+            ]);
+        }
+
+        // Scanned/image-only PDFs: OpenAI may accept input_file but not expand page images into context.
+        // Recover by sending embedded raster page images as Responses input_image parts.
+        if (empty($biomarkers) && $localFile && is_file($localFile->getRealPath())) {
+            Log::warning('PDF input_file paths failed — retrying with embedded page images as input_image', [
+                'filename' => $filename,
+                'file_id' => $fileId,
+            ]);
+            $biomarkers = $this->analyzePdfWithEmbeddedPageImages($localFile, $prompt, $apiKey);
+            Log::info('Embedded page-image fallback result', [
+                'filename' => $filename,
+                'biomarker_count' => count($biomarkers),
+            ]);
+        }
+
+        if (empty($biomarkers) && $localFile) {
+            Log::warning('Empty biomarkers after Responses API — activating PDF text fallback', [
+                'filename' => $filename,
+                'file_id' => $fileId,
+            ]);
+            $biomarkers = $this->analyzePdfViaTextFallback($localFile, $filename);
+            Log::info('PDF text fallback result', [
+                'filename' => $filename,
+                'biomarker_count' => count($biomarkers),
+            ]);
+        }
+
+        if (empty($biomarkers)) {
+            Log::error('PDF extraction ended with zero biomarkers', [
+                'filename' => $filename,
+                'file_id' => $fileId,
+                'response_id' => $responseData['id'] ?? null,
+                'input_tokens' => $inputTokens,
+                'note' => 'Do not treat empty OpenAI biomarkers as successful extraction',
+            ]);
+        }
+
+        Log::info('Individual PDF extraction completed', [
+            'filename' => $filename,
+            'file_id' => $fileId,
+            'biomarker_count' => count($biomarkers),
+            'biomarker_names' => array_slice(array_column($biomarkers, 'name'), 0, 40),
+        ]);
+
+        Log::info('Individual PDF extraction validation', [
+            'filename' => $filename,
+            'expected_file_id' => $fileId,
+            'extracted_count' => count($biomarkers),
+        ]);
+
+        return $biomarkers;
+    }
+
+    protected function parseBiomarkersFromResponsesPayload(array $responseData, string $filename, ?string $fileId): array
+    {
         $outputText = $this->extractResponsesOutputText($responseData);
         
         if (empty($outputText)) {
             Log::error('OpenAI Responses API returned empty output for individual PDF', [
-                'filename' => $uploadedFile['original_name'] ?? 'unknown',
-                'file_id' => $uploadedFile['file_id'],
+                'filename' => $filename,
+                'file_id' => $fileId,
                 'response_id' => $responseData['id'] ?? null,
                 'status' => $responseData['status'] ?? null,
             ]);
-            throw new \RuntimeException('OpenAI returned an empty analysis response.');
+            return [];
         }
 
         $outputText = trim($outputText);
@@ -418,38 +708,398 @@ PROMPT;
         $outputText = preg_replace('/\s*```$/', '', $outputText);
         
         $data = json_decode($outputText, true);
-
         if (json_last_error() !== JSON_ERROR_NONE) {
+            $data = $this->parseJsonFromLlm($outputText);
+        }
+
+        if (!is_array($data)) {
             Log::error('OpenAI lab report analysis returned invalid JSON for individual PDF', [
-                'filename' => $uploadedFile['original_name'] ?? 'unknown',
-                'file_id' => $uploadedFile['file_id'],
+                'filename' => $filename,
+                'file_id' => $fileId,
                 'json_error' => json_last_error_msg(),
-                'response_id' => $responseData['id'] ?? null,
-                'preview' => mb_substr($outputText, 0, 500, 'UTF-8'),
+                'preview' => mb_substr($outputText, 0, 800, 'UTF-8'),
             ]);
-            throw new \RuntimeException('OpenAI lab report analysis returned invalid JSON');
+            return [];
         }
 
-        if (!isset($data['biomarkers']) || !is_array($data['biomarkers'])) {
-            throw new \RuntimeException('OpenAI response does not contain a valid biomarkers array.');
+        $biomarkers = $this->normalizeBiomarkerList($data);
+
+        if (empty($biomarkers)) {
+            Log::warning('OpenAI returned JSON but no biomarkers', [
+                'filename' => $filename,
+                'file_id' => $fileId,
+                'response_id' => $responseData['id'] ?? null,
+                'response_status' => $responseData['status'] ?? null,
+                'output_item_count' => count($responseData['output'] ?? []),
+                'output_text_length' => strlen($outputText),
+                'output_preview' => mb_substr($outputText, 0, 400, 'UTF-8'),
+                'biomarkers_count' => 0,
+                'top_level_keys' => array_keys($data),
+                'note' => 'Empty biomarkers is NOT a successful extraction',
+            ]);
         }
-
-        $biomarkers = $data['biomarkers'];
-        
-        Log::info('Individual PDF extraction completed', [
-            'filename' => $uploadedFile['original_name'] ?? 'unknown',
-            'file_id' => $uploadedFile['file_id'],
-            'biomarker_count' => count($biomarkers),
-            'biomarker_names' => array_column($biomarkers, 'name'),
-        ]);
-
-        Log::info('Individual PDF extraction validation', [
-            'filename' => $uploadedFile['original_name'] ?? 'unknown',
-            'expected_file_id' => $uploadedFile['file_id'],
-            'extracted_count' => count($biomarkers),
-        ]);
 
         return $biomarkers;
+    }
+
+    protected function normalizeBiomarkerList(array $data): array
+    {
+        $candidates = [
+            $data['biomarkers'] ?? null,
+            $data['extracted_biomarkers'] ?? null,
+            $data['markers'] ?? null,
+            $data['result']['biomarkers'] ?? null,
+            $data['result']['extracted_biomarkers'] ?? null,
+            $data['data']['biomarkers'] ?? null,
+            $data['data']['extracted_biomarkers'] ?? null,
+        ];
+
+        $list = null;
+        foreach ($candidates as $candidate) {
+            if (is_array($candidate)) {
+                $list = $candidate;
+                break;
+            }
+        }
+
+        if ($list === null && array_is_list($data) && isset($data[0]) && is_array($data[0])) {
+            $list = $data;
+        }
+
+        if (!is_array($list)) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($list as $item) {
+            if (!is_array($item)) {
+                $name = trim((string) $item);
+                if ($name !== '') {
+                    $normalized[] = [
+                        'name' => $name,
+                        'value' => null,
+                        'unit' => null,
+                        'range' => null,
+                    ];
+                }
+                continue;
+            }
+
+            $name = trim((string) ($item['name'] ?? $item['biomarker'] ?? $item['test'] ?? $item['test_name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+
+            $normalized[] = [
+                'name' => $name,
+                'value' => $item['value'] ?? $item['result'] ?? null,
+                'unit' => $item['unit'] ?? null,
+                'range' => $item['range'] ?? $item['normal_range'] ?? $item['reference_range'] ?? null,
+                'source_document' => $item['source_document'] ?? null,
+            ];
+        }
+
+        return $normalized;
+    }
+
+    protected function analyzePdfWithInlineBase64(UploadedFile $file, string $prompt, string $apiKey): array
+    {
+        $bytes = @file_get_contents($file->getRealPath());
+        if ($bytes === false || $bytes === '' || strlen($bytes) > 20 * 1024 * 1024) {
+            return [];
+        }
+
+        $dataUri = 'data:application/pdf;base64,' . base64_encode($bytes);
+        $filename = $file->getClientOriginalName() ?: 'lab-report.pdf';
+
+        try {
+            $pdfModel = config('services.openai.pdf_model', 'gpt-4o');
+            // Same as file_id path: avoid text.format=json_object for PDF ingestion reliability.
+            $payload = [
+                'model' => $pdfModel,
+                'input' => [[
+                    'role' => 'user',
+                    'content' => [
+                        [
+                            'type' => 'input_file',
+                            'filename' => $filename,
+                            'file_data' => $dataUri,
+                        ],
+                        [
+                            'type' => 'input_text',
+                            'text' => $prompt . "\n\nThe laboratory PDF is attached inline. Read every page. Never return an empty biomarkers array if lab values are visible.\nReturn ONLY valid JSON.",
+                        ],
+                    ],
+                ]],
+            ];
+
+            $this->logResponsesApiDiagnostics('request_inline_base64', 'https://api.openai.com/v1/responses', $payload, null, null, $apiKey);
+
+            $response = $this->openAiHttpClient($apiKey)
+                ->asJson()
+                ->timeout(300)
+                ->post('https://api.openai.com/v1/responses', $payload);
+
+            $responseData = $response->json() ?? [];
+            $inputTokens = (int) data_get($responseData, 'usage.input_tokens', 0);
+            $this->logResponsesApiDiagnostics('response_inline_base64', 'https://api.openai.com/v1/responses', $payload, $response, $responseData, $apiKey);
+
+            if (!$response->successful()) {
+                Log::error('Inline PDF Responses API failed', [
+                    'status' => $response->status(),
+                    'body' => mb_substr($response->body(), 0, 400),
+                ]);
+                return [];
+            }
+
+            $biomarkers = $this->parseBiomarkersFromResponsesPayload(
+                $responseData,
+                $filename,
+                'inline-base64'
+            );
+
+            if ($this->isPdfContentMissingFromModel($inputTokens, $biomarkers)) {
+                Log::warning('Inline PDF base64 also produced prompt-only/empty extraction', [
+                    'filename' => $filename,
+                    'input_tokens' => $inputTokens,
+                    'biomarker_count' => count($biomarkers),
+                ]);
+            }
+
+        return $biomarkers;
+        } catch (\Throwable $e) {
+            Log::error('Inline PDF analysis exception', [
+                'filename' => $filename,
+                'message' => $e->getMessage(),
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * Recover scanned/image-only PDFs when OpenAI input_file does not expand page images into context.
+     * Uses embedded JPEG/PNG streams already inside the PDF (no OCR.Space, no Imagick required).
+     */
+    protected function analyzePdfWithEmbeddedPageImages(UploadedFile $file, string $prompt, string $apiKey): array
+    {
+        $bytes = @file_get_contents($file->getRealPath());
+        if ($bytes === false || $bytes === '') {
+            return [];
+        }
+
+        $images = $this->extractRasterImagesFromPdf($bytes);
+        if (empty($images)) {
+            Log::warning('Embedded page-image fallback skipped — no usable raster images in PDF', [
+                'filename' => $file->getClientOriginalName(),
+                'pdf_bytes' => strlen($bytes),
+            ]);
+            return [];
+        }
+
+        $pdfModel = config('services.openai.pdf_model', 'gpt-4o');
+        $filename = $file->getClientOriginalName() ?: 'lab-report.pdf';
+        $content = [];
+
+        foreach ($images as $index => $image) {
+            $content[] = [
+                'type' => 'input_image',
+                'image_url' => 'data:' . $image['mime'] . ';base64,' . base64_encode($image['bytes']),
+                'detail' => 'high',
+            ];
+        }
+
+        $content[] = [
+            'type' => 'input_text',
+            'text' => $prompt . "\n\nsource_document must be: {$filename}\nLab report pages are attached as images (scanned PDF recovery). Extract ALL visible biomarkers.\nReturn ONLY valid JSON.",
+        ];
+
+        $payload = [
+            'model' => $pdfModel,
+            'input' => [[
+                'role' => 'user',
+                'content' => $content,
+            ]],
+        ];
+
+        Log::info('Embedded page-image Responses request', [
+            'filename' => $filename,
+            'image_count' => count($images),
+            'image_sizes' => array_map(fn ($img) => [
+                'mime' => $img['mime'],
+                'bytes' => strlen($img['bytes']),
+                'width' => $img['width'] ?? null,
+                'height' => $img['height'] ?? null,
+            ], $images),
+            'model' => $pdfModel,
+            'api_key_fingerprint' => $this->openAiKeyFingerprint($apiKey),
+        ]);
+
+        $this->logResponsesApiDiagnostics('request_embedded_images', 'https://api.openai.com/v1/responses', $payload, null, null, $apiKey);
+
+        try {
+            $response = $this->openAiHttpClient($apiKey)
+                ->asJson()
+                ->timeout(300)
+                ->post('https://api.openai.com/v1/responses', $payload);
+
+            $responseData = $response->json() ?? [];
+            $this->logResponsesApiDiagnostics('response_embedded_images', 'https://api.openai.com/v1/responses', $payload, $response, $responseData, $apiKey);
+
+            if (!$response->successful()) {
+                Log::error('Embedded page-image Responses API failed', [
+                    'status' => $response->status(),
+                    'body' => mb_substr($response->body(), 0, 400),
+                ]);
+                return [];
+            }
+
+            return $this->parseBiomarkersFromResponsesPayload(
+                $responseData,
+                $filename,
+                'embedded-page-images'
+            );
+        } catch (\Throwable $e) {
+            Log::error('Embedded page-image analysis exception', [
+                'filename' => $filename,
+                'message' => $e->getMessage(),
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * Pull embedded JPEG/PNG bitmaps from PDF bytes (typical scanned lab reports).
+     *
+     * @return array<int, array{mime:string,bytes:string,width?:int,height?:int}>
+     */
+    protected function extractRasterImagesFromPdf(string $raw): array
+    {
+        $candidates = [];
+
+        if (preg_match_all('/\xFF\xD8\xFF[\x00-\xFF]{2000,}?\xFF\xD9/', $raw, $jpegMatches)) {
+            foreach ($jpegMatches[0] as $jpeg) {
+                $candidates[] = ['mime' => 'image/jpeg', 'bytes' => $jpeg];
+            }
+        }
+
+        if (preg_match_all('/\x89PNG\r\n\x1a\n[\x00-\xFF]{2000,}?IEND\xaeB`\x82/', $raw, $pngMatches)) {
+            foreach ($pngMatches[0] as $png) {
+                $candidates[] = ['mime' => 'image/png', 'bytes' => $png];
+            }
+        }
+
+        $images = [];
+        $seen = [];
+        foreach ($candidates as $candidate) {
+            $hash = md5($candidate['bytes']);
+            if (isset($seen[$hash])) {
+                continue;
+            }
+            $seen[$hash] = true;
+
+            if (strlen($candidate['bytes']) < 8000) {
+                continue; // skip icons/thumbnails
+            }
+
+            $info = @getimagesizefromstring($candidate['bytes']);
+            if ($info === false) {
+                continue;
+            }
+
+            $width = (int) ($info[0] ?? 0);
+            $height = (int) ($info[1] ?? 0);
+            if ($width < 200 || $height < 200) {
+                continue;
+            }
+
+            $images[] = [
+                'mime' => $candidate['mime'],
+                'bytes' => $candidate['bytes'],
+                'width' => $width,
+                'height' => $height,
+            ];
+        }
+
+        // Prefer larger page scans first; cap to keep request size reasonable.
+        usort($images, fn ($a, $b) => strlen($b['bytes']) <=> strlen($a['bytes']));
+
+        return array_slice($images, 0, 15);
+    }
+
+    protected function analyzePdfViaTextFallback(UploadedFile $file, string $filename): array
+    {
+        try {
+            Log::info('Fallback PDF extraction activated', [
+                'filename' => $filename,
+                'path_exists' => is_file($file->getRealPath()),
+                'size_bytes' => $file->getSize(),
+                'readable' => is_readable($file->getRealPath()),
+            ]);
+
+            $textResult = $this->extractWithOpenAi($file, '');
+            if ($textResult && !empty($textResult['extracted_biomarkers'])) {
+                $out = [];
+                foreach ($textResult['extracted_biomarkers'] as $item) {
+                    if (is_array($item)) {
+                        $name = trim((string) ($item['name'] ?? ''));
+                        if ($name === '') {
+                            continue;
+                        }
+                        $out[] = [
+                            'name' => $name,
+                            'value' => $item['value'] ?? null,
+                            'unit' => $item['unit'] ?? null,
+                            'range' => $item['range'] ?? null,
+                            'source_document' => $filename,
+                        ];
+                    } else {
+                        $name = trim((string) $item);
+                        if ($name !== '') {
+                            $out[] = [
+                                'name' => $name,
+                                'value' => null,
+                                'unit' => null,
+                                'range' => null,
+                                'source_document' => $filename,
+                            ];
+                        }
+                    }
+                }
+                Log::info('Fallback PDF extraction result', [
+                    'filename' => $filename,
+                    'source' => $textResult['source'] ?? 'openai_text',
+                    'biomarker_count' => count($out),
+                    'text_length' => strlen((string) ($textResult['ocr_text'] ?? '')),
+                ]);
+                return $out;
+            }
+
+            $pdfText = $this->extractTextFromPdf($file);
+            Log::info('Fallback PDF extraction result', [
+                'filename' => $filename,
+                'source' => 'local_pdf_text',
+                'text_length' => strlen($pdfText),
+                'ocr_text_length' => 0,
+            ]);
+
+            if ($pdfText === '') {
+                return [];
+            }
+
+            return array_map(fn ($name) => [
+                'name' => $name,
+                'value' => null,
+                'unit' => null,
+                'range' => null,
+                'source_document' => $filename,
+            ], $this->extractBiomarkerNamesFromText($pdfText));
+        } catch (\Throwable $e) {
+            Log::error('PDF text fallback failed', [
+                'filename' => $filename,
+                'message' => $e->getMessage(),
+            ]);
+            return [];
+        }
     }
 
     public function extractResponsesOutputText(array $responseData): string
@@ -465,22 +1115,22 @@ PROMPT;
         $texts = [];
 
         foreach (($responseData['output'] ?? []) as $outputItem) {
-
-            if (($outputItem['type'] ?? null) !== 'message') {
-                continue;
-            }
-
+            if (($outputItem['type'] ?? null) === 'message') {
             foreach (($outputItem['content'] ?? []) as $contentItem) {
-
-                if (($contentItem['type'] ?? null) !== 'output_text') {
+                    $contentType = $contentItem['type'] ?? null;
+                    if (!in_array($contentType, ['output_text', 'text'], true)) {
                     continue;
                 }
-
                 $text = $contentItem['text'] ?? '';
-
                 if (is_string($text) && trim($text) !== '') {
                     $texts[] = trim($text);
                 }
+                }
+                continue;
+            }
+
+            if (isset($outputItem['text']) && is_string($outputItem['text']) && trim($outputItem['text']) !== '') {
+                $texts[] = trim($outputItem['text']);
             }
         }
 
@@ -594,7 +1244,6 @@ PROMPT;
                     'confidence' => $this->score((float) $item['confidence']),
                 ];
             }, $available),
-            
             'missing_count' => count($missing),
             'missing_biomarkers' => array_map(function ($item) {
                 return [
@@ -605,7 +1254,6 @@ PROMPT;
                     'biomarkers' => $item['biomarkers'] ?? [],
                 ];
             }, $missing),
-            
             'total_count' => $organTests->count(),
             'to_pay' => number_format($toPay, 2, '.', ''),
             'currency' => 'AED',

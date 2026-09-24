@@ -487,6 +487,7 @@ use App\Http\Controllers\v1\PatientEmrReportController;
         Route::post('uploadAiVitalReport', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'uploadAiVitalReport']);
         Route::post('trigger-classification', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'triggerClassification']);
         Route::get('latestLongevityReport', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'getLatestLongevityReport']);
+        Route::get('recommendedOrganHealth', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'recommendedOrganHealth']);
         Route::get('vitals/{id?}', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'getVital']);
         Route::get('longevityReportPdf', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'longevityReportPdf'])->name('newshenai.longevityReportPdf');
         Route::get('downloadLatestLongevityReportPdf', [\App\Http\Controllers\v1\NewShenaiCareController::class, 'downloadLatestLongevityReportPdf']);

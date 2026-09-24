@@ -362,7 +362,13 @@ class SenoclockService
         $bodyLower = strtolower($responseBody);
         
         $permanentErrors = [
+            // Actual SenoClock 409 body: {"msg":["Need minimum of 15 Biomarkers"]}
+            'need minimum of 15 biomarkers' => 'Marker count validation',
+            'minimum of 15 biomarkers' => 'Marker count validation',
             'minimum 15 markers required' => 'Marker count validation',
+            'minimum 15 biomarkers' => 'Marker count validation',
+            // Blood-age algorithm rejected the payload (bad units/values) — retrying will not help.
+            'unable to get valid response from blood age algo' => 'Blood age algorithm failure',
             'unsupported or mismatched units found' => 'Unit validation',
             'invalid marker' => 'Marker validation',
             'unsupported marker' => 'Marker validation',

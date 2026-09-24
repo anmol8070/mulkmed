@@ -58,6 +58,15 @@ class SenoclockAiService
             $payload = $this->buildClassificationPayload($request ?? new Request(), $age, $sex, $aiVital);
             $payload = $this->normalizeClassificationPayload($payload);
 
+            $uploadedFileName = null;
+            if ($aiVital && !empty($aiVital->pdf_file)) {
+                $uploadedFileName = basename($aiVital->pdf_file);
+            } elseif ($request && $request->hasFile('report_file')) {
+                $uploadedFileName = $request->file('report_file')->getClientOriginalName();
+            } elseif ($request && $request->input('report_file')) {
+                $uploadedFileName = basename((string) $request->input('report_file'));
+            }
+
             // Debug body logging (commented out)
             // $this->logExactTriggerClassificationBody($payload, [
             //     'source' => 'processAiVital',
@@ -65,9 +74,10 @@ class SenoclockAiService
             //     'user_id' => $aiVital->user_id,
             //     'age' => $age,
             //     'sex' => $sex,
+            //     'uploaded_file_name' => $uploadedFileName,
             // ]);
 
-            $responseBody = $this->triggerClassification($accessToken, $payload, $email, $password);
+            $responseBody = $this->triggerClassification($accessToken, $payload, $email, $password, false, $uploadedFileName);
             
             if ($responseBody === null || isset($responseBody['error'])) {
                 $errorMsg = $responseBody['message'] ?? 'Senoclock AI API Error: Classification failed or returned no response';
@@ -225,24 +235,26 @@ class SenoclockAiService
 
     public function normalizeClassificationPayload(array $payload): array
     {
-        if (isset($payload['heartRate']) && !isset($payload['Heart Rate (HR)'])) {
-            $payload['Heart Rate (HR)'] = $payload['heartRate'];
-        }
-        if (isset($payload['respiratoryRate']) && !isset($payload['Breathing Rate'])) {
-            $payload['Breathing Rate'] = $payload['respiratoryRate'];
-        }
-        if (isset($payload['stressLevel']) && !isset($payload['Stress Index'])) {
-            $payload['Stress Index'] = $payload['stressLevel'];
-        }
-        if (isset($payload['bmi']) && !isset($payload['Body Mass Index (BMI)'])) {
-            $payload['Body Mass Index (BMI)'] = $payload['bmi'];
-        }
-        if (isset($payload['bloodPressure']) && is_string($payload['bloodPressure']) && !isset($payload['Blood Pressure'])) {
-            if (preg_match('/^(\d+)\/(\d+)/', trim($payload['bloodPressure']), $matches)) {
-                $payload['Blood Pressure'] = [
-                    'systolic' => (int) $matches[1],
-                    'diastolic' => (int) $matches[2],
-                ];
+        $aliases = [
+            'heartRate' => 'Heart Rate (HR)',
+            'respiratoryRate' => 'Breathing Rate',
+            'stressLevel' => 'Stress Index',
+            'bmi' => 'Body Mass Index (BMI)',
+            'wellnessScore' => 'Wellness Score',
+            'hrvSdnnMs' => 'Heart Rate Variability (HRV)',
+            'basalMetabolicRate' => 'Basal Metabolic Rate (BMR)',
+            'totalDailyEnergyExpenditure' => 'Total Daily Energy Expenditure (TDEE)',
+            'vascularAge' => 'Vascular Age',
+            'bodyFat' => 'Body Fat %',
+            'cardiacWorkload' => 'Cardiac Workload',
+            'parasympatheticActivity' => 'Parasympathetic Activity',
+        ];
+
+        foreach ($aliases as $from => $to) {
+            if (isset($payload[$from]) && !isset($payload[$to])) {
+                $payload[$to] = $payload[$from];
+            } elseif (isset($payload[$to]) && !isset($payload[$from])) {
+                $payload[$from] = $payload[$to];
             }
         }
 
@@ -274,6 +286,13 @@ class SenoclockAiService
             'Waist-to-Height Ratio (WHtR)',
             'Total Daily Energy Expenditure (TDEE)',
             'Cardiovascular Risk Score (Framingham FRS)',
+            'wellnessScore',
+            'hrvSdnnMs',
+            'bmi',
+            'basalMetabolicRate',
+            'totalDailyEnergyExpenditure',
+            'heartRate',
+            'vascularAge',
         ];
 
         foreach ($numericKeys as $key) {
@@ -281,15 +300,12 @@ class SenoclockAiService
                 continue;
             }
 
-            $payload[$key] = $this->castNumericValue($payload[$key]);
-        }
-
-        if (isset($payload['Blood Pressure']) && is_array($payload['Blood Pressure'])) {
-            foreach (['systolic', 'diastolic'] as $bpKey) {
-                if (array_key_exists($bpKey, $payload['Blood Pressure'])) {
-                    $payload['Blood Pressure'][$bpKey] = $this->castNumericValue($payload['Blood Pressure'][$bpKey]);
-                }
+            // Do not cast if value is a biomarker object array
+            if (is_array($payload[$key])) {
+                continue;
             }
+
+            $payload[$key] = $this->castNumericValue($payload[$key]);
         }
 
         return array_filter(
@@ -298,14 +314,62 @@ class SenoclockAiService
         );
     }
 
+    private function unwrapMetricValue(mixed $value): mixed
+    {
+        if (!is_array($value)) {
+            return $value;
+        }
+
+        if (array_key_exists('systolic', $value) || array_key_exists('diastolic', $value)) {
+            return $value;
+        }
+
+        return $value['result'] ?? $value['value'] ?? $value['input_value'] ?? $value;
+    }
+
+    private function normalizeBloodPressure(mixed $bloodPressure): ?array
+    {
+        if ($bloodPressure === null || $bloodPressure === '') {
+            return null;
+        }
+
+        if (is_array($bloodPressure)) {
+            if (isset($bloodPressure['systolic']) || isset($bloodPressure['diastolic'])) {
+                return [
+                    'systolic' => $this->castNumericValue($bloodPressure['systolic'] ?? null),
+                    'diastolic' => $this->castNumericValue($bloodPressure['diastolic'] ?? null),
+                ];
+            }
+            $bloodPressure = $bloodPressure['result'] ?? $bloodPressure['value'] ?? null;
+        }
+
+        if (!is_string($bloodPressure) && !is_numeric($bloodPressure)) {
+            return null;
+        }
+
+        if (preg_match('/(\d+)\s*\/\s*(\d+)/', trim((string) $bloodPressure), $matches)) {
+            return [
+                'systolic' => (int) $matches[1],
+                'diastolic' => (int) $matches[2],
+            ];
+        }
+
+        return null;
+    }
+
     private function castNumericValue(mixed $value): mixed
     {
+        $value = $this->unwrapMetricValue($value);
+
         if (is_int($value) || is_float($value)) {
             return $value;
         }
 
-        if (is_string($value) && $value !== '' && is_numeric($value)) {
-            return str_contains($value, '.') ? (float) $value : (int) $value;
+        if (is_string($value) && $value !== '') {
+            $cleaned = str_replace(',', '', trim($value));
+            if (is_numeric($cleaned)) {
+                return str_contains($cleaned, '.') ? (float) $cleaned : (int) $cleaned;
+            }
         }
 
         return $value;
@@ -370,7 +434,7 @@ class SenoclockAiService
         return null;
     }
 
-    private function triggerClassification(string $accessToken, array $payload, string $email = '', string $password = '', bool $isRetry = false): ?array
+    private function triggerClassification(string $accessToken, array $payload, string $email = '', string $password = '', bool $isRetry = false, ?string $uploadedFileName = null): ?array
     {
         $url = $this->apiUrl('/dl-api/mulkmed/trigger-classification/');
 
@@ -382,7 +446,7 @@ class SenoclockAiService
         // Log::info('Authorization: Bearer ' . substr($accessToken, 0, 12) . '...(redacted)');
         // Log::info($bodyJson !== false ? $bodyJson : '{}');
         // Log::info('===== SENO CLOCK TRIGGER-CLASSIFICATION EXACT REQUEST BODY END =====');
-        // $this->writeExactBodyToFile($payload, $url, $isRetry);
+        // $this->writeExactBodyToFile($payload, $url, $isRetry, $uploadedFileName);
 
         $response = Http::timeout(60)
             ->acceptJson()
@@ -397,11 +461,13 @@ class SenoclockAiService
         // Log::info($responseJson !== false ? $responseJson : $response->body());
         // Log::info('===== SENO CLOCK TRIGGER-CLASSIFICATION RESPONSE END =====');
 
+        // $this->writeExactResponseToFile($response->json() ?? $response->body(), $response->status(), $uploadedFileName);
+
         if ($response->status() === 401 && !$isRetry && !empty($email) && !empty($password)) {
             Log::info('Senoclock AI token expired, auto-refreshing token and retrying...');
             $newToken = $this->fetchAccessToken($email, $password, true);
             if ($newToken) {
-                return $this->triggerClassification($newToken, $payload, $email, $password, true);
+                return $this->triggerClassification($newToken, $payload, $email, $password, true, $uploadedFileName);
             }
         }
 
@@ -418,7 +484,7 @@ class SenoclockAiService
 
     /**
      * Log exact JSON body sent to Senoclock trigger-classification.
-     * (Debug helper — currently unused / commented out at call sites)
+     * (Commented out)
      */
     private function logExactTriggerClassificationBody(array $payload, array $meta = []): void
     {
@@ -431,42 +497,64 @@ class SenoclockAiService
     }
 
     /**
-     * Always write the exact request body to a dedicated file for easy inspection.
-     * (Debug helper — currently unused / commented out at call sites)
+     * Always write the exact request body to ONE dedicated JSON file based on uploaded report name.
+     * (Commented out)
      */
-    private function writeExactBodyToFile(array $payload, string $url, bool $isRetry = false): void
+    private function writeExactBodyToFile(array $payload, string $url, bool $isRetry = false, ?string $uploadedFileName = null): void
     {
         // try {
-        //     $dir = storage_path('logs');
-        //     if (!is_dir($dir)) {
-        //         @mkdir($dir, 0777, true);
+        //     $publicDir = public_path('uploads/ai_vital_senoclock');
+        //     if (!is_dir($publicDir)) {
+        //         @mkdir($publicDir, 0777, true);
         //     }
         //
-        //     $stamp = date('Y-m-d_H-i-s');
-        //     $filePath = $dir . DIRECTORY_SEPARATOR . 'senoclock_trigger_classification_body.json';
-        //     $historyPath = $dir . DIRECTORY_SEPARATOR . "senoclock_trigger_body_{$stamp}.json";
+        //     $fileNameOnly = $uploadedFileName ? basename($uploadedFileName) : 'uploaded_report.pdf';
+        //     $nameWithoutExt = pathinfo($fileNameOnly, PATHINFO_FILENAME);
         //
-        //     $content = json_encode([
-        //         'logged_at' => date('c'),
-        //         'url' => $url,
+        //     $formattedData = [
+        //         'api_url' => $url,
         //         'method' => 'POST',
-        //         'is_retry' => $isRetry,
-        //         'body' => $payload,
-        //     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        //         'uploaded_file_name' => $fileNameOnly,
+        //         'request_body' => $payload,
+        //     ];
         //
-        //     if ($content === false) {
-        //         $content = '{}';
-        //     }
+        //     $content = json_encode($formattedData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        //     if ($content === false) { $content = '{}'; }
         //
-        //     file_put_contents($filePath, $content);
-        //     file_put_contents($historyPath, $content);
-        //
-        //     Log::info('Senoclock exact request body saved to file', [
-        //         'latest_file' => $filePath,
-        //         'history_file' => $historyPath,
-        //     ]);
+        //     file_put_contents($publicDir . DIRECTORY_SEPARATOR . "{$nameWithoutExt}_body.json", $content);
+        //     file_put_contents($publicDir . DIRECTORY_SEPARATOR . 'senoclock_trigger_classification_body.json', $content);
         // } catch (\Throwable $e) {
         //     Log::warning('Failed to write Senoclock request body file: ' . $e->getMessage());
+        // }
+    }
+
+    /**
+     * Always write the exact response body to ONE dedicated JSON file based on uploaded report name.
+     * (Commented out)
+     */
+    private function writeExactResponseToFile(mixed $responseBody, int $statusCode, ?string $uploadedFileName = null): void
+    {
+        // try {
+        //     $publicDir = public_path('uploads/ai_vital_senoclock');
+        //     if (!is_dir($publicDir)) {
+        //         @mkdir($publicDir, 0777, true);
+        //     }
+        //
+        //     $fileNameOnly = $uploadedFileName ? basename($uploadedFileName) : 'uploaded_report.pdf';
+        //     $nameWithoutExt = pathinfo($fileNameOnly, PATHINFO_FILENAME);
+        //
+        //     $content = json_encode([
+        //         'received_at' => date('c'),
+        //         'status_code' => $statusCode,
+        //         'uploaded_file_name' => $fileNameOnly,
+        //         'response' => $responseBody,
+        //     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        //     if ($content === false) { $content = '{}'; }
+        //
+        //     file_put_contents($publicDir . DIRECTORY_SEPARATOR . "{$nameWithoutExt}_response.json", $content);
+        //     file_put_contents($publicDir . DIRECTORY_SEPARATOR . 'senoclock_trigger_classification_response.json', $content);
+        // } catch (\Throwable $e) {
+        //     Log::warning('Failed to write Senoclock response body file: ' . $e->getMessage());
         // }
     }
 
@@ -486,31 +574,61 @@ class SenoclockAiService
         }
         $report = array_merge($allInputs, $report);
 
+        if ($aiVital && !empty($aiVital->shen_ai)) {
+            $shen = $this->parseReport($aiVital->shen_ai);
+            $looksLikeClassification = isset($shen['ranked_parameters'])
+                || isset($shen['trigger'])
+                || isset($shen['triggers'])
+                || isset($shen['data']['ranked_parameters']);
+            if (!$looksLikeClassification) {
+                $report = array_merge($shen, $report);
+            }
+        }
+
         $payload = [
             'user_id' => (string) ($request->user_id ?? $aiVital?->user_id ?? ''),
             'appointment_id' => (string) ($request->appointment_id ?? $aiVital?->appointment_id ?? '0'),
             'date' => $request->date ?? $request->scan_date ?? $aiVital?->scan_date ?? date('Y-m-d H:i:s'),
             'age' => $age,
             'sex' => $sex,
-            'heartRate' => $this->reportValue($report, ['heartRate', 'heart_rate', 'Heart Rate (HR)', 'hr']),
-            'bloodPressure' => $this->reportValue($report, ['bloodPressure', 'blood_pressure', 'Blood Pressure', 'bp']),
-            'oxygenSaturation' => $this->reportValue($report, ['oxygenSaturation', 'spo2', 'oxygen_saturation', 'SpO2']),
-            'temperature' => $this->reportValue($report, ['temperature', 'temp']),
-            'respiratoryRate' => $this->reportValue($report, ['respiratoryRate', 'respiratory_rate', 'breathingRate', 'breathing_rate', 'Breathing Rate']),
-            'stressLevel' => $this->reportValue($report, ['stressLevel', 'stress_level', 'stressIndex', 'stress_index', 'Stress Index']),
-            'bmi' => $this->reportValue($report, ['bmi', 'Body Mass Index (BMI)']),
-            'weight' => $this->reportValue($report, ['weight']),
-            'height' => $this->reportValue($report, ['height']),
-            'hrvSdnnMs' => $this->reportValue($report, ['hrvSdnnMs', 'hrv', 'Heart Rate Variability (HRV)']),
-            'parasympatheticActivity' => $this->reportValue($report, ['parasympatheticActivity', 'parasympathetic_activity', 'Parasympathetic Activity']),
-            'cardiacWorkload' => $this->reportValue($report, ['cardiacWorkload', 'cardiac_workload', 'Cardiac Workload']),
-            'wellnessScore' => $this->reportValue($report, ['wellnessScore', 'wellness_score', 'Wellness Score']),
-            'vascularAge' => $this->reportValue($report, ['vascularAge', 'vascular_age', 'Vascular Age']),
-            'bodyFat' => $this->reportValue($report, ['bodyFat', 'body_fat', 'Body Fat %']),
         ];
 
-        if (isset($report['healthIndices']) && is_array($report['healthIndices'])) {
-            $payload['healthIndices'] = $report['healthIndices'];
+        // Merge all extracted biomarker keys from $report preserving full objects
+        foreach ($report as $key => $val) {
+            if (in_array($key, ['user_id', 'appointment_id', 'date', 'scan_date', 'age', 'sex', 'report_file', 'file', 'email', 'password', 'report', 'payload', 'shen_ai'])) {
+                continue;
+            }
+            if ($val !== null && $val !== '') {
+                $payload[$key] = $val;
+            }
+        }
+
+        // Aliases for standard keys if missing
+        $aliasMap = [
+            'heartRate' => ['heart_rate', 'Heart Rate (HR)', 'hr'],
+            'bloodPressure' => ['blood_pressure', 'Blood Pressure', 'bp'],
+            'oxygenSaturation' => ['spo2', 'oxygen_saturation', 'SpO2'],
+            'temperature' => ['temp'],
+            'respiratoryRate' => ['respiratory_rate', 'breathingRate', 'breathing_rate', 'Breathing Rate', 'Breathing Rate (BR)'],
+            'stressLevel' => ['stress_level', 'stressIndex', 'stress_index', 'Stress Index'],
+            'bmi' => ['Body Mass Index (BMI)'],
+            'hrvSdnnMs' => ['hrv', 'Heart Rate Variability (HRV)'],
+            'parasympatheticActivity' => ['parasympathetic_activity', 'Parasympathetic Activity'],
+            'cardiacWorkload' => ['cardiac_workload', 'Cardiac Workload'],
+            'wellnessScore' => ['wellness_score', 'Wellness Score'],
+            'vascularAge' => ['vascular_age', 'Vascular Age'],
+            'bodyFat' => ['body_fat', 'Body Fat %'],
+            'basalMetabolicRate' => ['bmr', 'BMR', 'Basal Metabolic Rate (BMR)'],
+            'totalDailyEnergyExpenditure' => ['tdee', 'TDEE', 'Total Daily Energy Expenditure (TDEE)'],
+        ];
+
+        foreach ($aliasMap as $primaryKey => $altKeys) {
+            if (!isset($payload[$primaryKey])) {
+                $foundVal = $this->reportValue($report, $altKeys);
+                if ($foundVal !== null) {
+                    $payload[$primaryKey] = $foundVal;
+                }
+            }
         }
 
         return array_filter(
@@ -550,11 +668,41 @@ class SenoclockAiService
         return [];
     }
 
+    private function flattenReportMetrics(array $report): array
+    {
+        $flat = $report;
+        foreach (['healthIndices', 'data'] as $nestKey) {
+            if (!isset($report[$nestKey]) || !is_array($report[$nestKey])) {
+                continue;
+            }
+            foreach ($report[$nestKey] as $key => $value) {
+                if ($value === null || $value === '' || $key === 'healthIndices') {
+                    continue;
+                }
+                if (!isset($flat[$key]) || $flat[$key] === null || $flat[$key] === '') {
+                    $flat[$key] = $value;
+                }
+            }
+            if (isset($report[$nestKey]['healthIndices']) && is_array($report[$nestKey]['healthIndices'])) {
+                foreach ($report[$nestKey]['healthIndices'] as $key => $value) {
+                    if ($value === null || $value === '') {
+                        continue;
+                    }
+                    if (!isset($flat[$key]) || $flat[$key] === null || $flat[$key] === '') {
+                        $flat[$key] = $value;
+                    }
+                }
+            }
+        }
+
+        return $flat;
+    }
+
     private function reportValue(array $report, string|array $keys): mixed
     {
         $keys = (array) $keys;
         foreach ($keys as $key) {
-            if (array_key_exists($key, $report) && $report[$key] !== null) {
+            if (array_key_exists($key, $report) && $report[$key] !== null && $report[$key] !== '') {
                 return $report[$key];
             }
         }
@@ -942,15 +1090,21 @@ class SenoclockAiService
             'alkaline phosphatase' => 'ALP',
             'alp' => 'ALP',
             
-            // ALT - Alanine Transaminase
-            'alanine transaminase' => 'ALT',
-            'sgpt' => 'ALT',
-            'alt' => 'ALT',
-            
             // AST - Aspartate Transaminase
             'aspartate transaminase' => 'AST',
+            'aspartate aminotransferase' => 'AST',
+            'aspartate aminotransferase (ast)' => 'AST',
             'sgot' => 'AST',
+            'sgot ast' => 'AST',
             'ast' => 'AST',
+            
+            // ALT - Alanine Transaminase  
+            'alanine transaminase' => 'ALT',
+            'alanine aminotransferase' => 'ALT',
+            'alanine transaminase (alt)' => 'ALT',
+            'sgpt' => 'ALT',
+            'sgpt alt' => 'ALT',
+            'alt' => 'ALT',
             
             // ATLYMPH - Atypical lymphocytes
             'atypical lymphocytes' => 'ATLYMPH',
@@ -1018,12 +1172,18 @@ class SenoclockAiService
             
             // GLC - Glucose
             'glucose' => 'GLC',
+            'fasting glucose' => 'GLC',
+            'glucose fasting' => 'GLC',
+            'blood sugar' => 'GLC',
             'blood sugar (fasting)' => 'GLC',
+            'blood glucose' => 'GLC',
             'blood glucose (fasting)' => 'GLC',
             'glc' => 'GLC',
             
             // HCT - Hematocrit
             'hematocrit' => 'HCT',
+            'hematocrit (pcv)' => 'HCT',
+            'pcv' => 'HCT',
             'hct' => 'HCT',
             
             // HDL - HDL Cholestrol
@@ -1037,20 +1197,27 @@ class SenoclockAiService
             
             // HGB - Hemoglobin
             'hemoglobin' => 'HGB',
+            'haemoglobin' => 'HGB',
             'hemoglobin (hb)' => 'HGB',
+            'haemoglobin (hb)' => 'HGB',
             'hb' => 'HGB',
             'hgb' => 'HGB',
             
-            // HGBA1C - Hemoglobin A1c
+            // HGBA1C - Hemoglobin A1c (must be checked before plain "hemoglobin" via longest-match)
             'hemoglobin a1c' => 'HGBA1C',
+            'haemoglobin a1c' => 'HGBA1C',
+            'hemoglobin a1c (hba1c)' => 'HGBA1C',
+            'glycohemoglobin' => 'HGBA1C',
             'hba1c' => 'HGBA1C',
             'hgba1c' => 'HGBA1C',
             
             // IRON - Iron
             'iron' => 'IRON',
+            'iron, serum' => 'IRON',
             
             // K+ - Potassium
             'potassium' => 'K+',
+            'potassium, serum' => 'K+',
             'k' => 'K+',
             'k+' => 'K+',
             
@@ -1070,14 +1237,20 @@ class SenoclockAiService
             
             // MCH - Mean Corpuscular Haemoglobin
             'mean corpuscular haemoglobin' => 'MCH',
+            'mean corpuscular hemoglobin' => 'MCH',
+            'mean corpuscular hemoglobin (mch)' => 'MCH',
             'mch' => 'MCH',
             
             // MCHC - Mean Corpuscular Haemoglobin Concentration
             'mean corpuscular haemoglobin concentration' => 'MCHC',
+            'mean corpuscular hemoglobin concentration' => 'MCHC',
+            'mean corpuscular hb conc' => 'MCHC',
+            'mean corpuscular hb conc. (mchc)' => 'MCHC',
             'mchc' => 'MCHC',
             
             // MCV - Mean Corpuscular Volume
             'mean corpuscular volume' => 'MCV',
+            'mean corpuscular volume (mcv)' => 'MCV',
             'mcv' => 'MCV',
             
             // MONO% - Monocytes,%
@@ -1092,6 +1265,7 @@ class SenoclockAiService
             
             // NA+ - Sodium
             'sodium' => 'NA+',
+            'sodium, serum' => 'NA+',
             'na' => 'NA+',
             'na+' => 'NA+',
             
@@ -1103,6 +1277,9 @@ class SenoclockAiService
             
             // P - Phosphorous
             'phosphorous' => 'P',
+            'phosphorus' => 'P',
+            'phosphorous, inorganic' => 'P',
+            'phosphorus, inorganic' => 'P',
             'p' => 'P',
             
             // PDW - Platelet Distribution Width
@@ -1292,15 +1469,44 @@ class SenoclockAiService
     public function findSenoclockKey(string $name, array $mapping): ?string
     {
         $name = strtolower(trim($name));
+        if ($name === '') {
+            return null;
+        }
+
+        // Exact match first.
         if (isset($mapping[$name])) {
             return $mapping[$name];
         }
+
+        // Also try without parenthetical aliases: "hemoglobin a1c (hba1c)" → "hemoglobin a1c"
+        $nameNoParen = trim(preg_replace('/\s*\([^)]*\)/', '', $name) ?? $name);
+        $nameNoParen = preg_replace('/\s+/', ' ', $nameNoParen) ?? $nameNoParen;
+        if ($nameNoParen !== '' && $nameNoParen !== $name && isset($mapping[$nameNoParen])) {
+            return $mapping[$nameNoParen];
+        }
+
+        // Longest contained alias wins. Skip very short keys ("k","p","ast") for contains-matching
+        // so "fasting" does not map to AST and "like" does not map to K+.
+        $bestKey = null;
+        $bestLen = 0;
         foreach ($mapping as $mapKey => $senoKey) {
-            if ($mapKey === $name || str_contains($name, $mapKey) || str_contains($mapKey, $name)) {
-                return $senoKey;
+            $mapKey = (string) $mapKey;
+            $len = strlen($mapKey);
+            if ($len < 4) {
+                continue;
+            }
+            if (
+                str_contains($name, $mapKey) ||
+                ($nameNoParen !== '' && str_contains($nameNoParen, $mapKey))
+            ) {
+                if ($len > $bestLen) {
+                    $bestLen = $len;
+                    $bestKey = $senoKey;
+                }
             }
         }
-        return null;
+
+        return $bestKey;
     }
 
     private function extractValUnitRange(array $biomarker, array $extractedMap): ?array
@@ -1319,24 +1525,29 @@ class SenoclockAiService
         }
 
         if ($value !== null && $value !== '') {
-            if (is_numeric($value)) {
-                $value = str_contains((string)$value, '.') ? (float)$value : (int)$value;
+            // SenoClock blood-age algo requires numeric values.
+            if (!is_numeric($value)) {
+                return null;
             }
-            
+            $value = str_contains((string) $value, '.') ? (float) $value : (int) $value;
+
             if ($unit) {
-                // Fix greek letters and superscripts before stripping non-ascii
+                // Fix greek letters and superscripts BEFORE stripping non-ascii
                 $unit = str_replace(['μ', 'µ'], 'u', $unit);
-                $unit = str_replace(['³', 'Â³'], '^3', $unit);
-                $unit = str_replace(['²', 'Â²'], '^2', $unit);
+                $unit = str_replace(
+                    ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹', 'Â³', 'Â²'],
+                    ['^0', '^1', '^2', '^3', '^4', '^5', '^6', '^7', '^8', '^9', '^3', '^2'],
+                    $unit
+                );
                 $unit = str_replace('mmA3', 'mm^3', $unit);
 
-                $unit = preg_replace('/[^\x20-\x7E]/', '', $unit); // Strip non-ASCII
+                $unit = preg_replace('/[^\x20-\x7E]/', '', $unit); // Strip remaining non-ASCII
 
                 // Normalize spacing and common OCR errors for cell counts (PLT, RBC, WBC)
                 $unit = str_ireplace(['x10^', '*10^', 'x 10^', '10*'], '10^', $unit);
                 $unit = str_ireplace(['/ L', '/ l'], '/L', $unit);
                 $unit = str_ireplace(['/ uL', '/ ul', '/u l'], '/uL', $unit);
-                
+
                 // Senoclock strict unit conversions for identical cell counts
                 $unit = str_ireplace('10^3/uL', '10^9/L', $unit);
                 $unit = str_ireplace('10^6/uL', '10^12/L', $unit);
@@ -1346,15 +1557,47 @@ class SenoclockAiService
 
             $result = [
                 'value' => $value,
-                'unit' => $unit ?: "",
+                'unit' => $unit ?: '',
             ];
-            
-            // Explicitly do not include empty strings for range to avoid Senoclock parsing crashes
-            if ($range !== null && trim($range) !== '') {
-                $result['range'] = trim($range);
+
+            // Only send simple numeric ranges like the valid SenoClock example ("45-999", "4.0 - 6.0").
+            // Narrative ranges ("Desirable: < 200", "Up to 41") break the blood age algo.
+            $normalizedRange = $this->normalizeSenoclockRange($range);
+            if ($normalizedRange !== null) {
+                $result['range'] = $normalizedRange;
             }
 
             return $result;
+        }
+
+        return null;
+    }
+
+    /**
+     * Keep only simple min-max ranges acceptable to SenoClock file-execute.
+     */
+    private function normalizeSenoclockRange(mixed $range): ?string
+    {
+        if ($range === null) {
+            return null;
+        }
+
+        $range = trim((string) $range);
+        if ($range === '') {
+            return null;
+        }
+
+        // Normalize dashes
+        $range = str_replace(['–', '—', '−'], '-', $range);
+
+        // Accept "4.0 - 6.0" / "45-999" / "0.20 - 5"
+        if (preg_match('/^\d+(\.\d+)?\s*-\s*\d+(\.\d+)?$/', $range)) {
+            return preg_replace('/\s*-\s*/', ' - ', $range);
+        }
+
+        // Extract first two numbers from patterns like "13.0 - 17.0 (M) / 12.0 - 15.0 (F)"
+        if (preg_match('/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)/', $range, $m)) {
+            return $m[1] . ' - ' . $m[2];
         }
 
         return null;

@@ -45,5 +45,7 @@ return [
      'openai' => [
         'api_key' => env('OPENAI_API_KEY'),
         'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),
+        // Vision-capable model for PDF /v1/responses file inputs (page images).
+        'pdf_model' => env('OPENAI_PDF_MODEL', 'gpt-4o'),
     ],
 ];
