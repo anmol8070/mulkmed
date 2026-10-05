@@ -13,6 +13,7 @@ class AI_Vital extends Model
     protected $guarded = [];
 
     protected $casts = [
+        'senoclock_ai_request' => 'array',
         'senoclock_ai_response' => 'array',
         'shen_ai' => 'array',
     ];

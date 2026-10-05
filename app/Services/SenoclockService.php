@@ -13,6 +13,13 @@ class SenoclockService
     protected $password;
     protected $token;
 
+    /** Body sent to and response received from the last file-execute call. */
+    public ?array $lastExecutePayload = null;
+    public ?array $lastExecuteResponse = null;
+
+    /** Response of the last report download attempt. */
+    public ?array $lastDownloadResponse = null;
+
     public function __construct()
     {
         $this->baseUrl = config('services.senoclock.base_url', 'https://api-euc1.senoclock.ai');
@@ -181,9 +188,14 @@ class SenoclockService
         try {
             $url = "{$this->baseUrl}/dl-api/file-execute/";
             Log::info('SenoclockService: Attempting execution', ['url' => $url, 'payload' => $payload]);
+            $this->lastExecutePayload = $payload;
 
             $response = Http::withoutVerifying()->withToken($this->token)
                 ->post($url, $payload);
+            $this->lastExecuteResponse = [
+                'status' => $response->status(),
+                'body' => $response->json() ?? $response->body(),
+            ];
 
             Log::info('SenoclockService: Execute Response', [
                 'status' => $response->status(),
@@ -259,6 +271,15 @@ class SenoclockService
                     'content_type' => $contentType,
                     'body_sample' => substr($logBody, 0, 500)
                 ]);
+                $this->lastDownloadResponse = [
+                    'attempt' => $attempt,
+                    'url' => $url,
+                    'status' => $status,
+                    'content_type' => $contentType,
+                    'body' => str_contains(strtolower((string) $contentType), 'application/json')
+                        ? (json_decode($logBody, true) ?? $logBody)
+                        : (strpos(ltrim($body), '%PDF') === 0 ? 'PDF' : substr($logBody, 0, 500)),
+                ];
 
                 if ($response->successful()) {
                     // Detect if HTML is returned inside 200 OK

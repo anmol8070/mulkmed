@@ -277,8 +277,15 @@ class NewShenaiCareController extends Controller
         try {
             $this->ensureSchema();
 
-            $userId = $request->input('user_id', 0);
-            $appointmentId = $request->input('appointment_id', 0);
+            $rawUserId = $request->input('user_id');
+            $userId = ($rawUserId !== null && $rawUserId !== '' && is_numeric($rawUserId))
+                ? (str_contains((string) $rawUserId, '.') ? (float) $rawUserId : (int) $rawUserId)
+                : 0;
+
+            $rawAppointmentId = $request->input('appointment_id');
+            $appointmentId = ($rawAppointmentId !== null && $rawAppointmentId !== '' && is_numeric($rawAppointmentId))
+                ? (str_contains((string) $rawAppointmentId, '.') ? (float) $rawAppointmentId : (int) $rawAppointmentId)
+                : 0;
             $scanDate = $request->input('date') ?? $request->input('scan_date') ?? date('Y-m-d H:i:s');
 
             $reportData = $request->input('report');
@@ -328,6 +335,7 @@ class NewShenaiCareController extends Controller
                     'user_id' => $aiVital->user_id,
                     'appointment_id' => $aiVital->appointment_id,
                     'report' => json_decode($aiVital->report, true) ?? $aiVital->report,
+                    'senoclock_ai_request' => $aiVital->senoclock_ai_request,
                     'senoclock_ai_response' => $aiVital->senoclock_ai_response,
                     'pdf_file' => $aiVital->pdf_file,
                     'pdf_url' => $pdfUrl,
@@ -385,12 +393,13 @@ class NewShenaiCareController extends Controller
 
             $prompt = "You are extracting structured data from an AI Vital health report PDF.
 Read the ENTIRE uploaded PDF, including every page.
-Extract ALL health metrics, vital signs, physical parameters, indices, risk factors, and scores found in the PDF.
+Extract ALL health metrics, vital signs, physical parameters, indices, risk factors, scores, and patient demographic details (such as age, sex/gender, patient name, scan date) found in the PDF.
 Do not calculate, estimate, infer, guess, or hallucinate any value. Preserve the exact numeric or text values from the PDF.
 
 Return valid JSON only.
 Structure the JSON as a comprehensive flat object where keys are the metric names (in camelCase).
-For the value of each metric, return an object containing the following exact keys:
+For demographic details if present in the PDF, use simple key-value pairs (e.g. \"age\": 45, \"sex\": \"male\", \"patient_name\": \"John Doe\", \"scan_date\": \"2026-05-15\").
+For the value of each health metric / biomarker, return an object containing the following exact keys:
 - \"name\": The original field or biomarker name as it appears in the PDF
 - \"result\": The exact result value as a string (preserve all formatting, commas, decimals, e.g. \"1,259.00\", \"111 / 74\", \"46.54\")
 - \"unit\": The exact unit as a string (e.g. \"bpm\", \"mmHg\", \"%\", \"-\"). Leave empty if no unit.
@@ -404,6 +413,8 @@ CRITICAL INSTRUCTION: You MUST include the following specific keys if their corr
 - \"totalDailyEnergyExpenditure\"
 
 For all other metrics found (e.g., Blood Pressure, Stress Index, Vascular Age, Heart Rate, etc.), invent an appropriate camelCase key and add it to the JSON.
+
+RISK INDICES: For \"hypertensionRisk\", \"diabetesRisk\" and \"fattyLiverDiseaseRisk\", the PDF shows a risk level (e.g. \"Low\", \"High\") and usually a percentage (e.g. \"12.20%\") in the same result box. Put ONLY the level in \"result\" and put the exact percentage in an extra key \"risk_percentage\" (e.g. \"12.20%\"). Leave \"risk_percentage\" empty if the PDF shows no percentage.
 
 Rules:
 - If a parameter is not present, do not invent it.
@@ -437,6 +448,14 @@ Rules:
                 ->timeout(240)
                 ->post('https://api.openai.com/v1/responses', $payload);
 
+            if ($response->status() === 429) {
+                // Retry once after 2 seconds delay in case of momentary rate limit
+                sleep(2);
+                $response = $analyzerService->openAiHttpClient($apiKey)
+                    ->timeout(240)
+                    ->post('https://api.openai.com/v1/responses', $payload);
+            }
+
             $responseData = $response->json();
             
             Log::info('OpenAI Responses API completed', [
@@ -445,7 +464,11 @@ Rules:
             ]);
 
             if (!$response->successful()) {
-                throw new \RuntimeException('OpenAI Responses API failed with status ' . $response->status());
+                $openAiError = data_get($responseData, 'error.message') ?? $response->body();
+                if ($response->status() === 429) {
+                    throw new \RuntimeException('OpenAI API Quota / Rate Limit Exceeded (Status 429): ' . $openAiError);
+                }
+                throw new \RuntimeException('OpenAI Responses API failed with status ' . $response->status() . ': ' . $openAiError);
             }
 
             $outputText = $analyzerService->extractResponsesOutputText($responseData);
@@ -554,6 +577,7 @@ Rules:
                 'message' => 'Classification triggered successfully for AI Vital record.',
                 'data' => [
                     'id' => $aiVital->id,
+                    'senoclock_ai_request' => $aiVital->senoclock_ai_request,
                     'senoclock_ai_response' => $aiVital->senoclock_ai_response,
                 ],
             ]);
@@ -1212,6 +1236,32 @@ Rules:
             // Shape A: { parameter_name, matched_condition: {...|string} }
             if (array_key_exists('matched_condition', $mc) || array_key_exists('parameter_name', $mc)) {
                 $fallbackName = trim((string) ($mc['parameter_name'] ?? $mc['name'] ?? ''));
+
+                // Senoclock ranked parameter: the measured value is input_value and the range is
+                // reference_range / optimal_threshold; matched_condition ("systolic: high: 90-120; ...")
+                // is only the rule that fired, so it is neither the result nor the range.
+                if (array_key_exists('input_value', $mc) || array_key_exists('reference_range', $mc) || array_key_exists('optimal_threshold', $mc)) {
+                    $inputValue = $mc['input_value'] ?? null;
+                    if (is_array($inputValue) || is_object($inputValue)) {
+                        $inputValue = $this->extractScalarValue($inputValue);
+                    }
+                    $range = $mc['reference_range'] ?? $mc['optimal_threshold'] ?? $mc['normal_range'] ?? null;
+                    if ($this->displayOrDash($range) === '—' && is_string($mc['matched_condition'] ?? null)) {
+                        $range = $mc['matched_condition'];
+                    }
+                    // Result carries the measured value with the priority level, e.g. "27 (High)".
+                    $result = $this->displayOrDash($inputValue);
+                    $level = is_scalar($mc['priority_level'] ?? null) ? ucfirst(strtolower(trim((string) $mc['priority_level']))) : '';
+                    if ($level !== '') {
+                        $result = $result === '—' ? $level : $result . ' (' . $level . ')';
+                    }
+                    return [
+                        'name' => $fallbackName !== '' ? $fallbackName : 'Parameter',
+                        'result' => $result,
+                        'unit' => $this->displayOrDash($this->extractParameterUnit($mc, $this->resolveParameterDetails($fallbackName, null, [])['key'])),
+                        'normal_range' => $this->displayOrDash($range),
+                    ];
+                }
                 $condition = $mc['matched_condition'] ?? null;
 
                 if (is_object($condition)) {
@@ -1534,6 +1584,99 @@ Rules:
         }
     }
 
+    /**
+     * Normalize a report payload (scan or uploaded report, whose key names vary) into the shape the longevity Blade view reads.
+     */
+    protected function mapLongevityReportFields($source)
+    {
+        if (is_string($source)) {
+            $source = json_decode($source);
+        } elseif (is_array($source)) {
+            $source = json_decode(json_encode($source));
+        }
+        if (!is_object($source)) {
+            return new \stdClass();
+        }
+        $mapped = clone $source;
+
+        // Candidate metrics: top-level entries plus the children of any grouping object
+        // (the PDF extractor sometimes nests metrics, e.g. {"vitals": {"pulse": {...}}}).
+        $candidates = [];
+        foreach ((array) $source as $key => $value) {
+            if ($key === 'healthIndices') {
+                continue;
+            }
+            $candidates[$key] = $value;
+            if (is_object($value) && !isset($value->result) && !isset($value->value)) {
+                foreach ((array) $value as $childKey => $childValue) {
+                    $candidates[$childKey] ??= $childValue;
+                }
+            }
+        }
+
+        // Resolve a metric by known keys first, then by the metric's "name" / humanized key,
+        // because the extractor invents key names (pulse, pulseRate, heartRatePulse, ...).
+        $find = function (array $keys, string $namePattern) use ($candidates) {
+            foreach ($keys as $key) {
+                if (isset($candidates[$key]) && $candidates[$key] !== '') {
+                    return $candidates[$key];
+                }
+            }
+            foreach ($candidates as $key => $value) {
+                $label = is_object($value) && isset($value->name) && is_string($value->name) ? $value->name : '';
+                $humanKey = preg_replace('/(?<=[a-z])(?=[A-Z])|_/', ' ', (string) $key);
+                if (($label !== '' && preg_match($namePattern, $label)) || preg_match($namePattern, $humanKey)) {
+                    if ($value !== null && $value !== '' && !is_array($value)) {
+                        return $value;
+                    }
+                }
+            }
+            return null;
+        };
+
+        // Root-level metrics (page 1)
+        $mapped->heartRate = $find(['pulse', 'heartRate', 'pulseRate', 'pulseHr', 'pulseHR', 'heart_rate'], '/\bpulse\b|heart\s*rate(?!\s*variab)/i');
+        $mapped->bloodPressure = $find(['bloodPressure', 'blood_pressure', 'bp'], '/blood\s*pressure/i');
+        $mapped->hrvSdnnMs = $find(['hrvSdnnMs', 'hrv', 'heartRateVariability', 'hrv_sdnn_ms'], '/variability|\bhrv\b/i');
+        $mapped->respiratoryRate = $find(['breathingRate', 'respiratoryRate', 'breathing_rate', 'respiratory_rate'], '/breathing|respirat/i');
+        $mapped->stressLevel = $find(['stressIndex', 'stressLevel', 'stress_index'], '/stress/i');
+        $mapped->parasympatheticActivity = $find(['parasympatheticActivity'], '/parasympathetic/i');
+        $mapped->cardiacWorkload = $find(['cardiacWorkload'], '/cardiac\s*workload/i');
+        $mapped->bmi = $find(['bmi', 'bodyMassIndex'], '/body\s*mass|\bbmi\b/i');
+
+        // Create healthIndices object if it doesn't exist
+        $mapped->healthIndices = isset($source->healthIndices) && is_object($source->healthIndices)
+            ? clone $source->healthIndices
+            : new \stdClass();
+        $hi = $mapped->healthIndices;
+
+        // Map flat metrics to nested healthIndices
+        $hi->wellnessScore = $find(['wellnessScore'], '/wellness/i') ?? $hi->wellnessScore ?? null;
+        $hi->vascularAge = $find(['vascularAge'], '/vascular\s*age/i') ?? $hi->vascularAge ?? null;
+        $hi->totalCVMortalityRisk = $find(['cardiovascularRiskScore'], '/cardiovascular\s*risk\s*score/i') ?? $hi->totalCVMortalityRisk ?? null;
+        $hi->hypertensionRisk = $find(['hypertensionRisk'], '/hypertension/i') ?? $hi->hypertensionRisk ?? null;
+        $hi->diabetesRisk = $find(['diabetesRisk'], '/diabetes/i') ?? $hi->diabetesRisk ?? null;
+        $hi->nonAlcoholicFattyLiverDiseaseRisk = $find(['fattyLiverDiseaseRisk', 'nonAlcoholicFattyLiverDiseaseRisk'], '/fatty\s*liver|nafld/i') ?? $hi->nonAlcoholicFattyLiverDiseaseRisk ?? null;
+
+        $hi->waistToHeightRatio = $find(['waistToHeightRatio'], '/waist/i') ?? $hi->waistToHeightRatio ?? null;
+        $hi->bodyFatPercentage = $find(['bodyFatPercentage', 'bodyFat'], '/body\s*fat/i') ?? $hi->bodyFatPercentage ?? null;
+        $hi->bodyRoundnessIndex = $find(['bodyRoundnessIndex'], '/roundness/i') ?? $hi->bodyRoundnessIndex ?? null;
+        $hi->aBodyShapeIndex = $find(['bodyShapeIndex', 'aBodyShapeIndex'], '/body\s*shape|\babsi\b/i') ?? $hi->aBodyShapeIndex ?? null;
+        $hi->conicityIndex = $find(['conicityIndex'], '/conicity/i') ?? $hi->conicityIndex ?? null;
+        $hi->basalMetabolicRate = $find(['basalMetabolicRate', 'bmr'], '/basal\s*metabolic|\bbmr\b/i') ?? $hi->basalMetabolicRate ?? null;
+        $hi->totalDailyEnergyExpenditure = $find(['totalDailyEnergyExpenditure', 'tdee'], '/total\s*daily|\btdee\b/i') ?? $hi->totalDailyEnergyExpenditure ?? null;
+
+        // Nested cvDiseases
+        $hi->cvDiseases = isset($hi->cvDiseases) && is_object($hi->cvDiseases) ? clone $hi->cvDiseases : new \stdClass();
+        $hi->cvDiseases->overallRisk = $find(['cardiovascularDiseaseRisk'], '/cardiovascular\s*disease/i') ?? $hi->cvDiseases->overallRisk ?? null;
+
+        // Nested hardAndFatalEvents
+        $hi->hardAndFatalEvents = isset($hi->hardAndFatalEvents) && is_object($hi->hardAndFatalEvents) ? clone $hi->hardAndFatalEvents : new \stdClass();
+        $hi->hardAndFatalEvents->hardCVEventRisk = $find(['hardAndFatalEventsRisks', 'hardFatalEventsRisks', 'hardAndFatalEventsRisk'], '/hard.*fatal/i') ?? $hi->hardAndFatalEvents->hardCVEventRisk ?? null;
+
+        return $mapped;
+    }
+
     protected function generatePdfAndEmail(AI_Vital $aiVital, Users $user, Request $request): ?string
     {
         $viewName = $aiVital->is_longevity == 1 ? 'pages.aivital_LongevityReport' : 'pages.vitalScanReport';
@@ -1550,9 +1693,9 @@ Rules:
         $data = [
             'user' => $user,
             'scan_date' => $aiVital->scan_date ?? date('Y-m-d H:i:s'),
-            'report' => is_string($aiVital->report) ? json_decode($aiVital->report) : $aiVital->report,
+            'report' => $this->mapLongevityReportFields($aiVital->report),
             'senoclock_ai_response' => is_string($aiVital->senoclock_ai_response) ? json_decode($aiVital->senoclock_ai_response) : $aiVital->senoclock_ai_response,
-            'shen_ai' => is_string($aiVital->shen_ai) ? json_decode($aiVital->shen_ai) : $aiVital->shen_ai,
+            'shen_ai' => $this->mapLongevityReportFields($aiVital->shen_ai),
         ];
 
         [$reportArr, $senoclockArr, $shenArr] = $this->longevityVitalPayloadArrays($aiVital);
@@ -1624,47 +1767,8 @@ Rules:
         
         $data['senoclock_ai_response'] = !empty($ai_vital_report->senoclock_ai_response) ? (is_string($ai_vital_report->senoclock_ai_response) ? json_decode($ai_vital_report->senoclock_ai_response) : json_decode(json_encode($ai_vital_report->senoclock_ai_response))) : '';
         
-        // Normalize report data for the Blade view
-        $mapFields = function($source) {
-            if (!$source) return new \stdClass();
-            $mapped = clone $source;
-            
-            // Map root-level aliases
-            $mapped->heartRate = $source->pulse ?? $source->heartRate ?? null;
-            $mapped->respiratoryRate = $source->breathingRate ?? $source->respiratoryRate ?? null;
-            $mapped->stressLevel = $source->stressIndex ?? $source->stressLevel ?? null;
-            
-            // Create healthIndices object if it doesn't exist
-            if (!isset($mapped->healthIndices) || !is_object($mapped->healthIndices)) {
-                $mapped->healthIndices = new \stdClass();
-            }
-            
-            // Map flat metrics to nested healthIndices
-            $mapped->healthIndices->wellnessScore = $source->wellnessScore ?? $mapped->healthIndices->wellnessScore ?? null;
-            $mapped->healthIndices->vascularAge = $source->vascularAge ?? $mapped->healthIndices->vascularAge ?? null;
-            $mapped->healthIndices->totalCVMortalityRisk = $source->cardiovascularRiskScore ?? $mapped->healthIndices->totalCVMortalityRisk ?? null;
-            $mapped->healthIndices->hypertensionRisk = $source->hypertensionRisk ?? $mapped->healthIndices->hypertensionRisk ?? null;
-            $mapped->healthIndices->diabetesRisk = $source->diabetesRisk ?? $mapped->healthIndices->diabetesRisk ?? null;
-            $mapped->healthIndices->nonAlcoholicFattyLiverDiseaseRisk = $source->fattyLiverDiseaseRisk ?? $mapped->healthIndices->nonAlcoholicFattyLiverDiseaseRisk ?? null;
-            
-            $mapped->healthIndices->waistToHeightRatio = $source->waistToHeightRatio ?? $mapped->healthIndices->waistToHeightRatio ?? null;
-            $mapped->healthIndices->bodyFatPercentage = $source->bodyFatPercentage ?? $mapped->healthIndices->bodyFatPercentage ?? null;
-            $mapped->healthIndices->basalMetabolicRate = $source->basalMetabolicRate ?? $mapped->healthIndices->basalMetabolicRate ?? null;
-            $mapped->healthIndices->totalDailyEnergyExpenditure = $source->totalDailyEnergyExpenditure ?? $mapped->healthIndices->totalDailyEnergyExpenditure ?? null;
-            
-            // Nested cvDiseases
-            if (!isset($mapped->healthIndices->cvDiseases)) $mapped->healthIndices->cvDiseases = new \stdClass();
-            $mapped->healthIndices->cvDiseases->overallRisk = $source->cardiovascularDiseaseRisk ?? $mapped->healthIndices->cvDiseases->overallRisk ?? null;
-            
-            // Nested hardAndFatalEvents
-            if (!isset($mapped->healthIndices->hardAndFatalEvents)) $mapped->healthIndices->hardAndFatalEvents = new \stdClass();
-            $mapped->healthIndices->hardAndFatalEvents->hardCVEventRisk = $source->hardAndFatalEventsRisks ?? $mapped->healthIndices->hardAndFatalEvents->hardCVEventRisk ?? null;
-            
-            return $mapped;
-        };
-
-        $data['report'] = $mapFields($reportData);
-        $data['shen_ai'] = $mapFields($shenAiData);
+        $data['report'] = $this->mapLongevityReportFields($reportData);
+        $data['shen_ai'] = $this->mapLongevityReportFields($shenAiData);
 
         [$reportArr, $senoclockArr, $shenArr] = $this->longevityVitalPayloadArrays($ai_vital_report);
         $sections = $this->buildLongevityPriorityAndTriggers($reportArr, $senoclockArr, $shenArr);
@@ -1720,9 +1824,9 @@ Rules:
         $user = Users::where('id', $userId)->first();
         $data['user'] = $user;
         $data['scan_date'] = $ai_vital_report->scan_date ?? null;
-        $data['report'] = !empty($ai_vital_report->report) ? (is_string($ai_vital_report->report) ? json_decode($ai_vital_report->report) : $ai_vital_report->report) : '';
+        $data['report'] = $this->mapLongevityReportFields($ai_vital_report->report);
         $data['senoclock_ai_response'] = !empty($ai_vital_report->senoclock_ai_response) ? (is_string($ai_vital_report->senoclock_ai_response) ? json_decode($ai_vital_report->senoclock_ai_response) : $ai_vital_report->senoclock_ai_response) : '';
-        $data['shen_ai'] = !empty($ai_vital_report->shen_ai) ? (is_string($ai_vital_report->shen_ai) ? json_decode($ai_vital_report->shen_ai) : $ai_vital_report->shen_ai) : '';
+        $data['shen_ai'] = $this->mapLongevityReportFields($ai_vital_report->shen_ai);
 
         [$reportArr, $senoclockArr, $shenArr] = $this->longevityVitalPayloadArrays($ai_vital_report);
         $sections = $this->buildLongevityPriorityAndTriggers($reportArr, $senoclockArr, $shenArr);

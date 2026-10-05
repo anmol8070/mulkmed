@@ -280,17 +280,105 @@ class MajorOrganTestController extends Controller
             $labReport->markers = $senoclockMarkers;
             $labReport->save();
 
-            // Always generate after PDF upload when markers exist; never dispatch with zero markers.
-            if ($markerCount > 0) {
+            // SenoClock can only generate the report when all required biomarkers are present.
+            $missingRequired = $aiService->getMissingRequiredSenoclockMarkers($senoclockMarkers ?? []);
+
+            // data.missing_biomarkers lists the missing required SenoClock biomarkers first,
+            // followed by the missing organ test panels.
+            // Link each required code to its organ test (by test name, else its first biomarker)
+            // so the item carries the real id and price instead of id null.
+            $organTestByCode = [];
+            foreach ($organTests as $test) {
+                $testBiomarkers = is_array($test->biomarkers) ? $test->biomarkers : [];
+                $code = $aiService->findSenoclockKey((string) $test->name, $mapping)
+                    ?: (!empty($testBiomarkers) ? $aiService->findSenoclockKey((string) $testBiomarkers[0], $mapping) : null);
+                if ($code && !isset($organTestByCode[$code])) {
+                    $organTestByCode[$code] = $test;
+                }
+            }
+
+            $missingRequiredItems = [];
+            $usedTestIds = [];
+            foreach ($missingRequired as $code) {
+                $test = $organTestByCode[$code] ?? null;
+                if ($test) {
+                    $usedTestIds[$test->id] = true;
+                }
+                $missingRequiredItems[] = [
+                    'id' => $test?->id,
+                    'code' => $code,
+                    'name' => \App\Services\SenoclockAiService::REQUIRED_SENOCLOCK_BIOMARKER_NAMES[$code] ?? $code,
+                    'price' => number_format((float) ($test?->price ?? 0), 2, '.', ''),
+                    'biomarkers' => $test && is_array($test->biomarkers) ? $test->biomarkers : [$code],
+                    'is_required' => true,
+                ];
+            }
+
+            // Organ tests already listed as required are not repeated.
+            $missingOtherItems = [];
+            foreach ($analysis['missing_biomarkers'] ?? [] as $item) {
+                if (isset($usedTestIds[$item['id'] ?? null])) {
+                    continue;
+                }
+                $missingOtherItems[] = array_merge($item, ['is_required' => false]);
+            }
+            $missingAll = array_merge($missingRequiredItems, $missingOtherItems);
+            if (empty($missingAll)) {
+                // Nothing missing: leave the missing keys out of the response.
+                unset($analysis['missing_biomarkers'], $analysis['missing_count']);
+            } else {
+                $analysis['missing_biomarkers'] = $missingAll;
+                $analysis['missing_count'] = count($missingAll);
+                $analysis['missing_required_count'] = count($missingRequired);
+            }
+
+            if (!empty($missingRequired)) {
+                $labReport->senoclock_status = 'failed';
+                $labReport->save();
+                $analysis['senoclock'] = [
+                    'job_dispatched' => false,
+                    'status' => 'failed',
+                    'message' => 'SenoClock job not dispatched because required biomarkers are missing',
+                    'missing_biomarkers' => $missingRequired,
+                    'mapped_markers' => array_keys($senoclockMarkers ?? []),
+                ];
+                \Illuminate\Support\Facades\Log::warning($analysis['senoclock']['message'], [
+                    'lab_report_id' => $labReport->id ?? null,
+                    'missing_biomarkers' => $missingRequired,
+                    'mapped_markers' => array_keys($senoclockMarkers ?? []),
+                ]);
+            } elseif ($markerCount > 0) {
                 $labReport->senoclock_status = 'processing';
                 $labReport->save();
-                ProcessSenoclockIntegration::dispatch($labReport->id);
-                \Illuminate\Support\Facades\Log::info('SenoClock background job dispatched', [
+                // Upload -> file-execute -> one download attempt run here, so the response shows
+                // what SenoClock answered. If the PDF is not ready the job queues itself to keep
+                // polling; poll generateSenoclockReport with lab_report_id for the final PDF.
+                $job = new ProcessSenoclockIntegration($labReport->id, ProcessSenoclockIntegration::MODE_START);
+                app()->call([$job, 'handle']);
+                $labReport->refresh();
+
+                $analysis['senoclock'] = array_merge([
+                    'job_dispatched' => true,
+                    'marker_count' => $markerCount,
+                ], $job->result ?: [
+                    'status' => $labReport->senoclock_status,
+                    'message' => 'SenoClock job finished without a result',
+                ]);
+                \Illuminate\Support\Facades\Log::info('SenoClock start step finished', [
                     'lab_report_id' => $labReport->id ?? null,
                     'marker_count' => $markerCount,
+                    'status' => $analysis['senoclock']['status'] ?? null,
+                    'senoclock_id' => $analysis['senoclock']['senoclock_id'] ?? null,
                 ]);
             } else {
-                \Illuminate\Support\Facades\Log::warning('SenoClock job not dispatched because no biomarkers were extracted', [
+                $analysis['senoclock'] = [
+                    'job_dispatched' => false,
+                    'status' => 'failed',
+                    'message' => 'SenoClock job not dispatched because no biomarkers were extracted',
+                    'extracted_count' => $extractedCount,
+                    'mapped_count' => $markerCount,
+                ];
+                \Illuminate\Support\Facades\Log::warning($analysis['senoclock']['message'], [
                     'lab_report_id' => $labReport->id ?? null,
                     'extracted_count' => $extractedCount,
                     'mapped_count' => $markerCount,
@@ -422,16 +510,37 @@ class MajorOrganTestController extends Controller
             return $this->senoclockDownloadResponse($labReport);
         }
 
-        // Generate the report even if biomarkers are missing from the uploaded PDF.
-        // $markerCount = is_array($labReport->markers) ? count($labReport->markers) : 0;
-        // if ($markerCount < 16) {
-        //     return response()->json([
-        //         'status' => false,
-        //         'message' => 'SenoClock report cannot be generated yet. At least 16 biomarkers are required.',
-        //         'lab_report_id' => $labReport->id,
-        //         'marker_count' => $markerCount,
-        //     ], 200);
-        // }
+        // The background job is still uploading/executing/polling: report that instead of
+        // blocking on downloads or marking the report failed.
+        $isStillProcessing = $labReport->senoclock_status === 'processing'
+            && $labReport->updated_at
+            && $labReport->updated_at->gte(now()->subMinutes(5));
+        if ($isStillProcessing) {
+            return response()->json([
+                'status' => false,
+                'message' => 'SenoClock report is being generated. Please try again shortly.',
+                'data' => [
+                    'lab_report_id' => $labReport->id,
+                    'senoclock_id' => $labReport->senoclock_id,
+                    'senoclock_status' => 'processing',
+                    'downloads' => '',
+                    'download_url' => '',
+                ],
+            ]);
+        }
+
+        if (empty($labReport->senoclock_id) && $markerCount > 0) {
+            $missingRequired = app(\App\Services\SenoclockAiService::class)
+                ->getMissingRequiredSenoclockMarkers($labReport->markers);
+            if (!empty($missingRequired)) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Minimum required biomarkers are not available to generate the report.',
+                    'lab_report_id' => $labReport->id,
+                    'missing_biomarkers' => $missingRequired,
+                ], 200);
+            }
+        }
 
         if (empty($labReport->senoclock_id)) {
             $isStuckProcessing = $labReport->senoclock_status === 'processing'
@@ -509,12 +618,16 @@ class MajorOrganTestController extends Controller
         $senoclockId = $labReport->senoclock_id;
         $downloadKey = $senoclockId ?: $labReport->id;
         $pdfPath = $labReport->senoclock_pdf_path;
-        $downloads = !empty($pdfPath) ? '/' . ltrim($pdfPath, '/') : '';
-        $downloadUrl = url("api/v1/majorOrganTests/downloadSenoclockReport/{$downloadKey}");
+        $hasPdf = !empty($pdfPath) && file_exists(public_path($pdfPath));
+        $downloads = $hasPdf ? '/' . ltrim($pdfPath, '/') : '';
+        $downloadUrl = $hasPdf ? url("api/v1/majorOrganTests/downloadSenoclockReport/{$downloadKey}") : '';
 
+        // status is true only when there is a PDF to download.
         return response()->json([
-            'status' => true,
-            'message' => 'SenoClock report generated successfully.',
+            'status' => $hasPdf,
+            'message' => $hasPdf
+                ? 'SenoClock report generated successfully.'
+                : 'SenoClock report could not be generated.',
             'data' => [
                 'lab_report_id' => $labReport->id,
                 'senoclock_id' => $senoclockId,

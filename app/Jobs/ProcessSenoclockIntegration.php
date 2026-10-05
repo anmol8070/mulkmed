@@ -19,7 +19,19 @@ class ProcessSenoclockIntegration implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    /** Upload, execute and poll until the PDF is downloaded (original behaviour). */
+    public const MODE_FULL = 'full';
+    /** Upload, execute and make one download attempt; queue MODE_DOWNLOAD if the PDF is not ready. */
+    public const MODE_START = 'start';
+    /** Only poll for and save the PDF of an already executed report. */
+    public const MODE_DOWNLOAD = 'download';
+
     protected $labReportId;
+
+    protected string $mode;
+
+    /** Outcome of a MODE_START run, returned in the analyzeReport response. */
+    public array $result = [];
 
     /**
      * The number of seconds the job can run before timing out.
@@ -33,9 +45,19 @@ class ProcessSenoclockIntegration implements ShouldQueue
      *
      * @return void
      */
-    public function __construct($labReportId)
+    public function __construct($labReportId, string $mode = self::MODE_FULL)
     {
         $this->labReportId = $labReportId;
+        $this->mode = $mode;
+    }
+
+    private function fail(?LabReport $labReport, string $message, bool $markFailed = true): void
+    {
+        $this->result = array_merge($this->result, ['status' => 'failed', 'message' => $message]);
+        if ($labReport && $markFailed) {
+            $labReport->senoclock_status = 'failed';
+            $labReport->save();
+        }
     }
 
     /**
@@ -63,6 +85,17 @@ class ProcessSenoclockIntegration implements ShouldQueue
 
             if (!$labReport) {
                 Log::error("ProcessSenoclockIntegration: LabReport not found", ['lab_report_id' => $this->labReportId]);
+                $this->fail(null, 'Lab report not found');
+                return;
+            }
+
+            if ($this->mode === self::MODE_DOWNLOAD) {
+                if (!$senoclockService->authenticate()) {
+                    Log::error("ProcessSenoclockIntegration: Failed to authenticate with SenoClock API");
+                    $this->fail($labReport, 'Failed to authenticate with SenoClock API');
+                    return;
+                }
+                $this->downloadAndComplete($labReport, $senoclockService, (string) $labReport->senoclock_id, strval($labReport->user_id), 30);
                 return;
             }
 
@@ -99,12 +132,14 @@ class ProcessSenoclockIntegration implements ShouldQueue
 
             if (empty($documentPaths)) {
                 Log::error("ProcessSenoclockIntegration: Original PDFs not found for LabReport #{$labReport->id}");
+                $this->fail($labReport, 'Original lab report PDF not found', false);
                 return;
             }
 
             // POST /auth/login
             if (!$senoclockService->authenticate()) {
                 Log::error("ProcessSenoclockIntegration: Failed to authenticate with SenoClock API");
+                $this->fail($labReport, 'Failed to authenticate with SenoClock API', false);
                 return;
             }
 
@@ -112,6 +147,7 @@ class ProcessSenoclockIntegration implements ShouldQueue
             $senoclockId = $senoclockService->uploadDocument($documentPaths);
             if (!$senoclockId) {
                 Log::error("ProcessSenoclockIntegration: PDF upload failed");
+                $this->fail($labReport, 'SenoClock PDF upload failed', false);
                 return;
             }
 
@@ -232,24 +268,7 @@ class ProcessSenoclockIntegration implements ShouldQueue
                 Log::warning('ProcessSenoclockIntegration: Zero biomarkers — skipping report generation', [
                     'lab_report_id' => $labReport->id,
                 ]);
-                $labReport->senoclock_status = 'failed';
-                $labReport->save();
-                return;
-            }
-
-            // SenoClock PDF download requires >= 15 biomarkers (HTTP 409 otherwise).
-            // Abort before execute/download so the queue is not blocked for ~5 minutes.
-            $senoclockMinimum = 15;
-            if ($filteredMarkerCount < $senoclockMinimum) {
-                Log::warning('ProcessSenoclockIntegration: Insufficient markers for SenoClock report — skipping execute/download', [
-                    'lab_report_id' => $labReport->id,
-                    'filtered_marker_count' => $filteredMarkerCount,
-                    'senoclock_minimum_required' => $senoclockMinimum,
-                    'sent_markers' => array_keys($filteredMarkers),
-                    'reason' => 'SenoClock returns HTTP 409 Need minimum of 15 Biomarkers',
-                ]);
-                $labReport->senoclock_status = 'failed';
-                $labReport->save();
+                $this->fail($labReport, 'No biomarkers available to send to SenoClock');
                 return;
             }
 
@@ -270,14 +289,17 @@ class ProcessSenoclockIntegration implements ShouldQueue
                 ]);
             }
 
-            if (count($senoclockMarkers) < $senoclockMinimum) {
-                Log::warning('ProcessSenoclockIntegration: Insufficient numeric markers after cleanup — skipping execute/download', [
+            // SenoClock needs these specific biomarkers (other extracted markers are optional).
+            // Abort before execute/download — otherwise download keeps returning HTTP 409.
+            $missingRequired = $aiService->getMissingRequiredSenoclockMarkers($senoclockMarkers);
+            if (!empty($missingRequired)) {
+                Log::warning('ProcessSenoclockIntegration: Required biomarkers missing — skipping execute/download', [
                     'lab_report_id' => $labReport->id,
-                    'numeric_marker_count' => count($senoclockMarkers),
-                    'senoclock_minimum_required' => $senoclockMinimum,
+                    'missing_required_biomarkers' => $missingRequired,
+                    'sent_markers' => array_keys($senoclockMarkers),
                 ]);
-                $labReport->senoclock_status = 'failed';
-                $labReport->save();
+                $this->fail($labReport, 'Required biomarkers are missing');
+                $this->result['missing_biomarkers'] = $missingRequired;
                 return;
             }
 
@@ -339,8 +361,10 @@ class ProcessSenoclockIntegration implements ShouldQueue
                     'response_status' => null, // Note: handled inside executeAlgorithm
                 ]);
                 Log::error("ProcessSenoclockIntegration: Execution failed for LabReport #{$this->labReportId}");
-                $labReport->senoclock_status = 'failed';
-                $labReport->save();
+                $this->fail($labReport, 'SenoClock execution failed');
+                $this->result['senoclock_id'] = $senoclockId;
+                $this->result['execute_payload'] = $senoclockService->lastExecutePayload;
+                $this->result['execute_response'] = $senoclockService->lastExecuteResponse;
                 return;
             }
 
@@ -349,64 +373,100 @@ class ProcessSenoclockIntegration implements ShouldQueue
                 'test_date' => $senoclockTestDate,
                 'marker_count' => count($senoclockMarkers),
             ]);
-            
+
+            $this->result = [
+                'status' => 'processing',
+                'message' => 'SenoClock execution accepted',
+                'senoclock_id' => $senoclockId,
+                'execute_payload' => $senoclockService->lastExecutePayload,
+                'execute_response' => $senoclockService->lastExecuteResponse,
+            ];
+
             // Wait before trying to download the generated PDF
             sleep(5);
 
-            // GET /dl-api/report/download/?pdf_report=true&id=senoclock_id
-            $destinationDir = public_path('uploads/senoclock_report_generated');
-            $downloadResult = $senoclockService->downloadPdfWithRetry($senoclockId, $destinationDir, $externalId, 30, 5);
+            // MODE_START makes one download attempt so the caller can show its response,
+            // then hands the remaining polling to a queued MODE_DOWNLOAD job.
+            $maxAttempts = $this->mode === self::MODE_START ? 1 : 30;
+            $this->downloadAndComplete($labReport, $senoclockService, $senoclockId, $externalId, $maxAttempts);
+        } catch (\Throwable $e) {
+            Log::error('ProcessSenoclockIntegration: Exception caught', ['message' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            $this->result = array_merge($this->result, ['status' => 'failed', 'message' => $e->getMessage()]);
+        }
+    }
 
-            if (!$downloadResult['success']) {
-                Log::error("ProcessSenoclockIntegration: PDF download failed", ['error' => $downloadResult['error']]);
-                $labReport->senoclock_status = 'failed';
-                $labReport->save();
+    /**
+     * GET /dl-api/report/download/ — save the PDF and mark the report completed.
+     * In MODE_START a "not generated yet" answer queues a MODE_DOWNLOAD job instead of failing.
+     */
+    private function downloadAndComplete(LabReport $labReport, SenoclockService $senoclockService, string $senoclockId, string $externalId, int $maxAttempts): void
+    {
+        $destinationDir = public_path('uploads/senoclock_report_generated');
+        $downloadResult = $senoclockService->downloadPdfWithRetry($senoclockId, $destinationDir, $externalId, $maxAttempts, 5);
+        $this->result['senoclock_id'] = $senoclockId;
+        $this->result['download_response'] = $senoclockService->lastDownloadResponse;
+
+        if (!$downloadResult['success']) {
+            $notReady = ($senoclockService->lastDownloadResponse['status'] ?? null) === 202;
+            if ($this->mode === self::MODE_START && $notReady) {
+                self::dispatch($labReport->id, self::MODE_DOWNLOAD);
+                Log::info('ProcessSenoclockIntegration: Report not ready, download job queued', [
+                    'lab_report_id' => $labReport->id,
+                    'senoclock_id' => $senoclockId,
+                ]);
+                $this->result['status'] = 'processing';
+                $this->result['message'] = 'SenoClock report is being generated';
                 return;
             }
 
-            // Save PDF locally and update senoclock_pdf_path
-            $labReport->senoclock_pdf_path = 'uploads/senoclock_report_generated/' . $downloadResult['path'];
-            $labReport->senoclock_status = 'completed';
-            $labReport->senoclock_generated_at = now();
-            $labReport->save();
+            Log::error("ProcessSenoclockIntegration: PDF download failed", ['error' => $downloadResult['error']]);
+            $this->fail($labReport, $downloadResult['error'] ?? 'SenoClock PDF download failed');
+            return;
+        }
 
-            Log::info("ProcessSenoclockIntegration: Completed successfully for LabReport #{$labReport->id}");
+        // Save PDF locally and update senoclock_pdf_path
+        $labReport->senoclock_pdf_path = 'uploads/senoclock_report_generated/' . $downloadResult['path'];
+        $labReport->senoclock_status = 'completed';
+        $labReport->senoclock_generated_at = now();
+        $labReport->save();
 
-            // Automatically trigger the next background API/job (longevityReportPdf)
-            try {
+        $this->result['status'] = 'completed';
+        $this->result['message'] = 'SenoClock report generated successfully';
+        $this->result['downloads'] = '/' . ltrim($labReport->senoclock_pdf_path, '/');
+
+        Log::info("ProcessSenoclockIntegration: Completed successfully for LabReport #{$labReport->id}");
+
+        // Automatically trigger the next background API/job (longevityReportPdf)
+        try {
+            $vital = \App\Models\AI_Vital::where('user_id', $labReport->user_id)
+                ->where('is_longevity', 1)
+                ->orderBy('id', 'desc')
+                ->first();
+
+            if (!$vital) {
                 $vital = \App\Models\AI_Vital::where('user_id', $labReport->user_id)
-                    ->where('is_longevity', 1)
                     ->orderBy('id', 'desc')
                     ->first();
-
-                if (!$vital) {
-                    $vital = \App\Models\AI_Vital::where('user_id', $labReport->user_id)
-                        ->orderBy('id', 'desc')
-                        ->first();
-                }
-
-                if ($vital) {
-                    Log::info("ProcessSenoclockIntegration: Triggering longevityReportPdf for AI_Vital #{$vital->id}");
-                    $request = new \Illuminate\Http\Request();
-                    $request->replace([
-                        'user_id' => $labReport->user_id,
-                        'report_id' => $vital->id,
-                    ]);
-                    
-                    // Temporarily increase memory limit for DOMPDF generation
-                    ini_set('memory_limit', '1024M');
-                    app(\App\Http\Controllers\v1\NewShenaiCareController::class)->longevityReportPdf($request);
-                } else {
-                    Log::warning("ProcessSenoclockIntegration: Could not trigger longevityReportPdf, no AI_Vital found for user #{$labReport->user_id}");
-                }
-            } catch (\Throwable $apiException) {
-                Log::error("ProcessSenoclockIntegration: Failed to trigger longevityReportPdf", [
-                    'message' => $apiException->getMessage()
-                ]);
             }
 
-        } catch (\Throwable $e) {
-            Log::error('ProcessSenoclockIntegration: Exception caught', ['message' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            if ($vital) {
+                Log::info("ProcessSenoclockIntegration: Triggering longevityReportPdf for AI_Vital #{$vital->id}");
+                $request = new \Illuminate\Http\Request();
+                $request->replace([
+                    'user_id' => $labReport->user_id,
+                    'report_id' => $vital->id,
+                ]);
+
+                // Temporarily increase memory limit for DOMPDF generation
+                ini_set('memory_limit', '1024M');
+                app(\App\Http\Controllers\v1\NewShenaiCareController::class)->longevityReportPdf($request);
+            } else {
+                Log::warning("ProcessSenoclockIntegration: Could not trigger longevityReportPdf, no AI_Vital found for user #{$labReport->user_id}");
+            }
+        } catch (\Throwable $apiException) {
+            Log::error("ProcessSenoclockIntegration: Failed to trigger longevityReportPdf", [
+                'message' => $apiException->getMessage()
+            ]);
         }
     }
 
