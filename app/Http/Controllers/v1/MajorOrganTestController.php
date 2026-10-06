@@ -65,6 +65,7 @@ class MajorOrganTestController extends Controller
             'documents' => 'nullable|array',
             'documents.*' => 'file|mimes:pdf,jpeg,jpg,png|max:51200',
             'ocr_text' => 'nullable|string',
+            'package_id' => 'nullable|integer|exists:major_organ_package,id',
         ]);
 
         if ($validator->fails()) {
@@ -280,8 +281,19 @@ class MajorOrganTestController extends Controller
             $labReport->markers = $senoclockMarkers;
             $labReport->save();
 
-            // SenoClock can only generate the report when all required biomarkers are present.
-            $missingRequired = $aiService->getMissingRequiredSenoclockMarkers($senoclockMarkers ?? []);
+            // Required biomarkers depend on the package the user bought: Comprehensive plan = all
+            // SenoClock biomarkers, Basic plan or no plan = the 20 SenoClock requires.
+            // The report is only generated when every required biomarker is present.
+            // package_id (optional) = the plan selected in the app; otherwise the latest paid purchase.
+            $requirement = $aiService->getRequiredBiomarkersForUser(
+                (int) $request->user_id,
+                $request->filled('package_id') ? (int) $request->package_id : null
+            );
+            $missingRequired = $aiService->getMissingRequiredSenoclockMarkers($senoclockMarkers ?? [], $requirement['codes']);
+            $analysis['plan'] = $requirement['plan'];
+            $analysis['plan_package_title'] = $requirement['package_title'];
+            $analysis['required_biomarker_count'] = count($requirement['codes']);
+            $analysis['required_available_count'] = count($requirement['codes']) - count($missingRequired);
 
             // data.missing_biomarkers lists the missing required SenoClock biomarkers first,
             // followed by the missing organ test panels.
@@ -307,22 +319,53 @@ class MajorOrganTestController extends Controller
                 $missingRequiredItems[] = [
                     'id' => $test?->id,
                     'code' => $code,
-                    'name' => \App\Services\SenoclockAiService::REQUIRED_SENOCLOCK_BIOMARKER_NAMES[$code] ?? $code,
+                    'name' => \App\Services\SenoclockAiService::biomarkerName($code),
                     'price' => number_format((float) ($test?->price ?? 0), 2, '.', ''),
                     'biomarkers' => $test && is_array($test->biomarkers) ? $test->biomarkers : [$code],
                     'is_required' => true,
                 ];
             }
 
+            // Only the plan's biomarkers count: Basic/no plan = the 20, Comprehensive = all 54.
+            // Organ tests for biomarkers outside the plan are left out of missing/available.
+            $planCodes = array_flip($requirement['codes']);
+            $testCodeById = [];
+            foreach ($organTestByCode as $code => $test) {
+                $testCodeById[$test->id] = $code;
+            }
+            $isInPlan = fn($testId) => !isset($testCodeById[$testId]) || isset($planCodes[$testCodeById[$testId]]);
+
             // Organ tests already listed as required are not repeated.
             $missingOtherItems = [];
             foreach ($analysis['missing_biomarkers'] ?? [] as $item) {
-                if (isset($usedTestIds[$item['id'] ?? null])) {
+                if (isset($usedTestIds[$item['id'] ?? null]) || !$isInPlan($item['id'] ?? null)) {
                     continue;
                 }
                 $missingOtherItems[] = array_merge($item, ['is_required' => false]);
             }
             $missingAll = array_merge($missingRequiredItems, $missingOtherItems);
+
+            $analysis['available_biomarkers'] = array_values(array_filter(
+                $analysis['available_biomarkers'] ?? [],
+                fn($item) => $isInPlan($item['id'] ?? null)
+            ));
+            $analysis['available_count'] = count($analysis['available_biomarkers']);
+            $analysis['total_count'] = $analysis['available_count'] + count($missingAll);
+            $analysis['overall_match_percentage'] = $analysis['total_count'] > 0
+                ? round($analysis['available_count'] / $analysis['total_count'] * 100, 2)
+                : 0;
+            $analysis['to_pay'] = CurrencyHelper::convert(
+                (float) array_sum(array_map(fn($item) => (float) ($item['price'] ?? 0), $missingAll)),
+                $currency
+            );
+
+            $labReport->available_biomarkers = $analysis['available_biomarkers'];
+            $labReport->missing_biomarkers = $missingAll;
+            $labReport->available_count = $analysis['available_count'];
+            $labReport->missing_count = count($missingAll);
+            $labReport->total_count = $analysis['total_count'];
+            $labReport->overall_match_percentage = $analysis['overall_match_percentage'];
+            $labReport->save();
             if (empty($missingAll)) {
                 // Nothing missing: leave the missing keys out of the response.
                 unset($analysis['missing_biomarkers'], $analysis['missing_count']);
@@ -384,6 +427,9 @@ class MajorOrganTestController extends Controller
                     'mapped_count' => $markerCount,
                 ]);
             }
+
+            // Not shown in the app response (still kept in lab_reports.analysis_response).
+            unset($analysis['missing_fields'], $analysis['mismatches']);
 
             return response()->json([
                 'status' => true,
@@ -661,7 +707,9 @@ class MajorOrganTestController extends Controller
     public function package(Request $request)
     {
         $currency = CurrencyHelper::getUserCurrency();
-        $package = MajorOrganPackage::where('status', 1)->first();
+        $package = $request->filled('package_id')
+            ? MajorOrganPackage::where('status', 1)->find($request->package_id)
+            : MajorOrganPackage::where('status', 1)->first();
 
         if (!$package) {
             return response()->json([
@@ -671,7 +719,7 @@ class MajorOrganTestController extends Controller
             ]);
         }
 
-        $tests = MajorOrganTest::where('status', 1)->get();
+        $tests = $package->includedTests();
         $totalBiomarkers = 0;
         foreach ($tests as $item) {
             $bms = is_array($item->biomarkers) ? $item->biomarkers : [];
@@ -701,7 +749,9 @@ class MajorOrganTestController extends Controller
     public function planDetails(Request $request)
     {
         $currency = CurrencyHelper::getUserCurrency();
-        $package = MajorOrganPackage::where('status', 1)->first();
+        $package = $request->filled('package_id')
+            ? MajorOrganPackage::where('status', 1)->find($request->package_id)
+            : MajorOrganPackage::where('status', 1)->first();
 
         if (!$package) {
             return response()->json([
@@ -711,10 +761,7 @@ class MajorOrganTestController extends Controller
             ]);
         }
 
-        $tests = MajorOrganTest::where('status', 1)
-            ->orderBy('display_order', 'asc')
-            ->orderBy('id', 'asc')
-            ->get();
+        $tests = $package->includedTests();
 
         $totalBiomarkers = 0;
         $includedHealthChecks = $tests->map(function ($item) use (&$totalBiomarkers) {
@@ -806,10 +853,7 @@ class MajorOrganTestController extends Controller
             ], 404);
         }
 
-            $tests = MajorOrganTest::where('status', 1)
-                ->orderBy('display_order', 'asc')
-                ->orderBy('id', 'asc')
-                ->get();
+            $tests = $package->includedTests();
             
             $payload = $this->buildSelectionPayload($request->user_id, 'package', $package, $tests, $request->plan_id);
             
@@ -879,11 +923,10 @@ class MajorOrganTestController extends Controller
                 }
 
                 $packages = $query->get();
-                $allTests = MajorOrganTest::where('status', 1)->orderBy('display_order', 'asc')->orderBy('id', 'asc')->get();
                 
                 $totalAmountSum = 0;
-                $data = $packages->map(function ($package) use ($request, $allTests, &$totalAmountSum) {
-                    $payload = $this->buildSelectionPayload($request->user_id, 'package', $package, $allTests, $request->plan_id);
+                $data = $packages->map(function ($package) use ($request, &$totalAmountSum) {
+                    $payload = $this->buildSelectionPayload($request->user_id, 'package', $package, $package->includedTests(), $request->plan_id);
                     $mockModel = new MajorOrganUserSelection($payload);
                     $mockModel->id = $package->id;
                     $totalAmountSum += (float) $mockModel->total_amount;
@@ -1086,7 +1129,10 @@ class MajorOrganTestController extends Controller
             || ((float)$selection->total_amount == 599.00 && $selection->selection_type !== 'individual');
 
         if ($isPackageSelection) {
-            $allTests = \App\Models\MajorOrganTest::where('status', 1)->get();
+            $selectedPackage = !empty($selection->package_id) ? MajorOrganPackage::find($selection->package_id) : null;
+            $allTests = $selectedPackage
+                ? $selectedPackage->includedTests()
+                : \App\Models\MajorOrganTest::where('status', 1)->get();
             $totalPkgBiomarkersCount = 0;
             foreach ($allTests as $t) {
                 $bms = is_array($t->biomarkers) ? $t->biomarkers : [];

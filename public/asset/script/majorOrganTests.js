@@ -210,13 +210,51 @@ $(document).ready(function () {
     $('a[data-toggle="tab"]').on("shown.bs.tab", function (e) {
         const target = $(e.target).attr("href");
         toggleAddButton(target === "#SectionManage");
+        $("#addPackageBtn").toggleClass("d-none", target !== "#SectionPackage");
     });
 
     $('a[href="#SectionPreview"]').on("shown.bs.tab", function () {
         loadFrontendPreview();
     });
 
+    let packagesById = {};
+
+    function setPackageTests(testIds) {
+        const selected = (testIds || []).map(String);
+        $("#packageTestsList input[name='test_ids[]']").each(function () {
+            this.checked = selected.includes(this.value);
+        });
+    }
+
+    function loadPackageTestOptions() {
+        return $.getJSON(`${domainUrl}majorOrganTests/preview`).done(function (response) {
+            const $list = $("#packageTestsList").empty();
+            (response.data || []).forEach(function (test) {
+                $list.append(`<div class="custom-control custom-checkbox">
+                    <input type="checkbox" class="custom-control-input" id="packageTest${test.id}" name="test_ids[]" value="${test.id}">
+                    <label class="custom-control-label" for="packageTest${test.id}">${escapeHtml(test.name)}</label>
+                </div>`);
+            });
+            if (!response.data || !response.data.length) {
+                $list.append('<span class="text-muted">No active organ tests</span>');
+            }
+        });
+    }
+
+    $("#packageTestsSelectAll").on("click", function (event) {
+        event.preventDefault();
+        $("#packageTestsList input[name='test_ids[]']").prop("checked", true);
+    });
+
+    $("#packageTestsClear").on("click", function (event) {
+        event.preventDefault();
+        $("#packageTestsList input[name='test_ids[]']").prop("checked", false);
+    });
+
     function fillPackageForm(data) {
+        $("#packageImage").val("");
+        setPackageTests(data ? data.test_ids : []);
+
         if (!data) {
             $("#packageId").val("");
             $("#packageTitle").val("");
@@ -225,6 +263,7 @@ $(document).ready(function () {
             $("#packagePrice").val("");
             $("#packageStatus").val("1");
             $("#packagePreviewImage").attr("src", placeholderIcon);
+            $("#packageFormTitle").text("Add Package");
             return;
         }
 
@@ -235,13 +274,57 @@ $(document).ready(function () {
         $("#packagePrice").val(data.price || "");
         $("#packageStatus").val(String(data.status ?? 1));
         $("#packagePreviewImage").attr("src", data.image || placeholderIcon);
+        $("#packageFormTitle").text("Edit Package");
     }
 
-    function loadPackage() {
-        $.getJSON(`${domainUrl}majorOrganTests/package`)
+    function escapeHtml(value) {
+        return $("<div>").text(value ?? "").html();
+    }
+
+    function renderPackages(packages) {
+        packagesById = {};
+        const $tbody = $("#packagesTable tbody").empty();
+
+        if (!packages.length) {
+            $tbody.append('<tr><td colspan="7" class="text-center text-muted">No packages yet</td></tr>');
+            return;
+        }
+
+        packages.forEach(function (item) {
+            packagesById[item.id] = item;
+            const image = `<img src="${escapeHtml(item.image || placeholderIcon)}" width="50" height="50" style="object-fit:cover;border-radius:6px;">`;
+            const status = item.status == 1
+                ? '<span class="badge badge-success">Active</span>'
+                : '<span class="badge badge-secondary">Inactive</span>';
+            const actions = `<a href="#" class="mr-2 btn btn-primary text-white edit-package" rel="${item.id}">Edit</a>`
+                + `<a href="#" class="mr-2 btn btn-danger text-white delete-package" rel="${item.id}">Delete</a>`;
+
+            const tests = item.tests || [];
+            const testsLabel = item.includes_all_tests
+                ? `All active tests (${tests.length})`
+                : `${tests.length} test${tests.length === 1 ? "" : "s"}`;
+            const testsCol = `<a href="#" class="toggle-biomarkers font-weight-bold" data-target="package-tests-${item.id}">${testsLabel}</a>`
+                + `<ul id="package-tests-${item.id}" class="biomarker-list d-none list-unstyled mb-0 mt-2 pl-3">`
+                + tests.map((test) => `<li>${escapeHtml(test.name)}</li>`).join("")
+                + "</ul>";
+
+            $tbody.append(`<tr>
+                <td>${image}</td>
+                <td>${escapeHtml(item.title)}</td>
+                <td>${escapeHtml(item.badge)}</td>
+                <td>${escapeHtml(item.price)}</td>
+                <td>${testsCol}</td>
+                <td>${status}</td>
+                <td>${actions}</td>
+            </tr>`);
+        });
+    }
+
+    function loadPackages() {
+        $.getJSON(`${domainUrl}majorOrganTests/package/list`)
             .done(function (response) {
                 if (response.status) {
-                    fillPackageForm(response.data);
+                    renderPackages(response.data || []);
                 }
             })
             .fail(function (error) {
@@ -250,7 +333,57 @@ $(document).ready(function () {
     }
 
     $('a[href="#SectionPackage"]').on("shown.bs.tab", function () {
-        loadPackage();
+        loadPackageTestOptions();
+        loadPackages();
+    });
+
+    $("#addPackageBtn").on("click", function (event) {
+        event.preventDefault();
+        fillPackageForm(null);
+        $("#packageModal").modal("show");
+    });
+
+    $("#packagesTable").on("click", ".edit-package", function (event) {
+        event.preventDefault();
+        fillPackageForm(packagesById[$(this).attr("rel")] || null);
+        $("#packageModal").modal("show");
+    });
+
+    $("#packagesTable").on("click", ".delete-package", function (event) {
+        event.preventDefault();
+        const id = $(this).attr("rel");
+
+        swal({
+            title: strings.doYouReallyWantToContinue,
+            icon: "warning",
+            buttons: true,
+            dangerMode: true,
+        }).then((isConfirm) => {
+            if (!isConfirm) {
+                return;
+            }
+
+            if (user_type != "1") {
+                iziToast.error({
+                    title: strings.error,
+                    message: strings.youAreTester,
+                    position: "topRight",
+                });
+                return;
+            }
+
+            $.getJSON(`${domainUrl}majorOrganTests/package/delete/${id}`).done(function () {
+                if ($("#packageId").val() == id) {
+                    fillPackageForm(null);
+                }
+                loadPackages();
+                iziToast.success({
+                    title: strings.success,
+                    message: strings.operationSuccessful,
+                    position: "topRight",
+                });
+            });
+        });
     });
 
     attachImagePreview("packageImage", "packagePreviewImage");
@@ -290,8 +423,9 @@ $(document).ready(function () {
             success: function () {
                 $("#packageFormLoader").addClass("d-none");
                 $btn.prop("disabled", false).val("Save Package");
-                $("#packageImage").val("");
-                loadPackage();
+                $("#packageModal").modal("hide");
+                fillPackageForm(null);
+                loadPackages();
                 iziToast.success({
                     title: strings.success,
                     message: strings.operationSuccessful,

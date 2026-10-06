@@ -14,34 +14,68 @@ class MajorOrganTestController extends Controller
         return view('majorOrganTests');
     }
 
-    public function getPackage()
+    private function formatPackage(MajorOrganPackage $package): array
     {
-        $package = MajorOrganPackage::first();
+        $testIds = array_values(array_filter(array_map('intval', (array) ($package->test_ids ?? []))));
 
-        if (!$package) {
-            return response()->json([
-                'status' => true,
-                'data' => null,
-            ]);
-        }
+        return [
+            'id' => $package->id,
+            'title' => $package->title,
+            'badge' => $package->badge,
+            'description' => $package->description,
+            'price' => number_format((float) $package->price, 2, '.', ''),
+            'image' => !empty($package->image) ? GlobalFunction::createMediaUrl($package->image) : null,
+            'status' => (int) $package->status,
+            'test_ids' => $testIds,
+            'includes_all_tests' => empty($testIds),
+            'tests' => $package->includedTests()->map(fn($test) => [
+                'id' => $test->id,
+                'name' => $test->name,
+            ])->values(),
+        ];
+    }
+
+    public function getPackage(Request $request)
+    {
+        $package = $request->filled('id')
+            ? MajorOrganPackage::find($request->id)
+            : MajorOrganPackage::first();
 
         return response()->json([
             'status' => true,
-            'data' => [
-                'id' => $package->id,
-                'title' => $package->title,
-                'badge' => $package->badge,
-                'description' => $package->description,
-                'price' => number_format((float) $package->price, 2, '.', ''),
-                'image' => !empty($package->image) ? GlobalFunction::createMediaUrl($package->image) : null,
-                'status' => (int) $package->status,
-            ],
+            'data' => $package ? $this->formatPackage($package) : null,
         ]);
+    }
+
+    public function listPackages()
+    {
+        $packages = MajorOrganPackage::orderBy('id', 'asc')->get()
+            ->map(fn($package) => $this->formatPackage($package))
+            ->values();
+
+        return response()->json([
+            'status' => true,
+            'data' => $packages,
+        ]);
+    }
+
+    public function deletePackage($id)
+    {
+        $package = MajorOrganPackage::find($id);
+
+        if (!$package) {
+            return GlobalFunction::sendSimpleResponse(false, 'Package not found');
+        }
+
+        $package->delete();
+
+        return GlobalFunction::sendSimpleResponse(true, 'Package deleted successfully');
     }
 
     public function savePackage(Request $request)
     {
-        $package = MajorOrganPackage::first();
+        // With an id the package is updated, otherwise a new package is created.
+        $package = $request->filled('id') ? MajorOrganPackage::find($request->id) : null;
 
         if (!$package) {
             $package = new MajorOrganPackage();
@@ -52,6 +86,10 @@ class MajorOrganTestController extends Controller
         $package->description = $request->description;
         $package->price = $request->price;
         $package->status = (int) $request->status;
+
+        // Chosen organ tests; none chosen means the package includes every active test.
+        $testIds = array_values(array_unique(array_filter(array_map('intval', (array) $request->input('test_ids', [])))));
+        $package->test_ids = $testIds ?: null;
 
         if ($request->hasFile('image')) {
             $package->image = GlobalFunction::saveFileAndGivePath($request->image);

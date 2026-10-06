@@ -1374,10 +1374,14 @@ class SenoclockAiService
         return [
             // AAMY - Alpha-Amylase
             'alpha-amylase' => 'AAMY',
+            'amylase' => 'AAMY',
+            'serum amylase' => 'AAMY',
             'aamy' => 'AAMY',
             
             // AFP - Alpha Fetoprotein
             'alpha fetoprotein' => 'AFP',
+            'alpha feto protein' => 'AFP',
+            'alpha-fetoprotein' => 'AFP',
             'afp' => 'AFP',
             
             // ALB - Albumin
@@ -1424,10 +1428,15 @@ class SenoclockAiService
             
             // BILIT - Total Bilirubin
             'total bilirubin' => 'BILIT',
+            'bilirubin total' => 'BILIT',
+            'bilirubin, total' => 'BILIT',
+            'bilirubin (total)' => 'BILIT',
+            'bilirubin' => 'BILIT',
             'bilit' => 'BILIT',
             
             // BUN - Blood Urea Nitrogen
             'blood urea nitrogen' => 'BUN',
+            'urea nitrogen' => 'BUN',
             'blood urea nitrogen (bun)' => 'BUN',
             'bun' => 'BUN',
             
@@ -1465,6 +1474,10 @@ class SenoclockAiService
             
             // GGT - Gamma-GT
             'gamma-gt' => 'GGT',
+            'gamma glutamyl transferase' => 'GGT',
+            'gamma glutamyl transpeptidase' => 'GGT',
+            'gamma-glutamyl transferase' => 'GGT',
+            'ggtp' => 'GGT',
             'ggt' => 'GGT',
             
             // GLOBT - Total Globulin
@@ -1484,6 +1497,7 @@ class SenoclockAiService
             
             // HCT - Hematocrit
             'hematocrit' => 'HCT',
+            'haematocrit' => 'HCT',
             'hematocrit (pcv)' => 'HCT',
             'pcv' => 'HCT',
             'hct' => 'HCT',
@@ -1510,6 +1524,10 @@ class SenoclockAiService
             'haemoglobin a1c' => 'HGBA1C',
             'hemoglobin a1c (hba1c)' => 'HGBA1C',
             'glycohemoglobin' => 'HGBA1C',
+            'glycated hemoglobin' => 'HGBA1C',
+            'glycated haemoglobin' => 'HGBA1C',
+            'glycosylated hemoglobin' => 'HGBA1C',
+            'glycosylated haemoglobin' => 'HGBA1C',
             'hba1c' => 'HGBA1C',
             'hgba1c' => 'HGBA1C',
             
@@ -1604,6 +1622,8 @@ class SenoclockAiService
             
             // RDW - Red Cell Distribution Width
             'red cell distribution width' => 'RDW',
+            'rdw-cv' => 'RDW',
+            'rdw cv' => 'RDW',
             'rdw' => 'RDW',
             
             // TRIG - Triglycerides
@@ -1617,12 +1637,22 @@ class SenoclockAiService
             
             // WBC - White Blood Cell
             'white blood cell' => 'WBC',
+            'white blood cells' => 'WBC',
+            'total leucocyte count' => 'WBC',
+            'total leukocyte count' => 'WBC',
+            'leucocyte count' => 'WBC',
+            'leukocyte count' => 'WBC',
+            'tlc' => 'WBC',
             'total wbc count' => 'WBC',
             'wbc count' => 'WBC',
             'wbc' => 'WBC',
             
             // CRP - C-reactive protein
             'c-reactive protein' => 'CRP',
+            'hs-crp' => 'CRP',
+            'hscrp' => 'CRP',
+            'high sensitivity crp' => 'CRP',
+            'high sensitivity c-reactive protein' => 'CRP',
             'c-reactive protein (crp)' => 'CRP',
             'crp' => 'CRP',
             
@@ -1632,12 +1662,17 @@ class SenoclockAiService
             
             // PTH - Parathyroid hormone
             'parathyroid hormone' => 'PTH',
+            'intact pth' => 'PTH',
+            'pth intact' => 'PTH',
+            'pth (intact)' => 'PTH',
             'thyroid stimulating hormone' => 'TSH', // TSH is generally used instead of PTH sometimes but PTH is Parathyroid
             'pth' => 'PTH',
             'tsh' => 'TSH',
             
             // APOB - Apolipoprotein B
             'apolipoprotein b' => 'APOB',
+            'apo b' => 'APOB',
+            'apo-b' => 'APOB',
             'apob' => 'APOB',
             
             // LDH - Lactate Dehydrogenase
@@ -1651,10 +1686,14 @@ class SenoclockAiService
             
             // GFR - Glomerular Filtration Rate
             'glomerular filtration rate' => 'GFR',
+            'egfr' => 'GFR',
+            'estimated gfr' => 'GFR',
+            'estimated glomerular filtration rate' => 'GFR',
             'gfr' => 'GFR',
             
             // IGF-1 - Insulin-like Growth Factor-1
             'insulin-like growth factor-1' => 'IGF-1',
+            'somatomedin c' => 'IGF-1',
             'igf-1' => 'IGF-1',
             
             // C-PEPTIDE - Connecting peptide
@@ -1699,10 +1738,129 @@ class SenoclockAiService
     ];
 
     /**
+     * Every biomarker SenoClock accepts (code => full name), in SenoClock's reference order.
+     * Required in full for users who bought the Comprehensive Mulk Longevity plan.
+     */
+    public const ALL_SENOCLOCK_BIOMARKER_NAMES = [
+        'AAMY' => 'Alpha-Amylase',
+        'AFP' => 'Alpha Fetoprotein',
+        'ALB' => 'Albumin',
+        'ALP' => 'Alkaline Phosphatase',
+        'ALT' => 'Alanine Transaminase',
+        'AST' => 'Aspartate Transaminase',
+        'ATLYMPH' => 'Atypical lymphocytes',
+        'BASO%' => 'Basophils,%',
+        'BILID' => 'Direct Bilirubin',
+        'BILIT' => 'Total Bilirubin',
+        'BUN' => 'Blood Urea Nitrogen',
+        'CA' => 'Calcium',
+        'CHOLT' => 'Total Cholesterol',
+        'CL' => 'Chloride',
+        'CREA' => 'Creatinine',
+        'EOS%' => 'Eosinophils,%',
+        'ESR' => 'Erythrocyte Sedimentation Rate',
+        'FERR' => 'Ferritin',
+        'GGT' => 'Gamma-GT',
+        'GLOBT' => 'Total Globulin',
+        'GLC' => 'Glucose',
+        'HCT' => 'Hematocrit',
+        'HDL' => 'HDL Cholestrol',
+        'HGB' => 'Hemoglobin',
+        'HGBA1C' => 'Hemoglobin A1c',
+        'IRON' => 'Iron',
+        'K+' => 'Potassium',
+        'LDL' => 'LDL Cholesterol',
+        'LYMPH%' => 'Lymphocytes,%',
+        'MCH' => 'Mean Corpuscular Haemoglobin',
+        'MCHC' => 'Mean Corpuscular Haemoglobin Concentration',
+        'MCV' => 'Mean Corpuscular Volume',
+        'MONO%' => 'Monocytes,%',
+        'MPV' => 'Mean Platelet Volume',
+        'NA+' => 'Sodium',
+        'NEUTR%' => 'Neutrophils,%',
+        'P' => 'Phosphorous',
+        'PDW' => 'Platelet Distribution Width',
+        'PLT' => 'Platelets',
+        'PROT' => 'Total Protein',
+        'RBC' => 'Red Blood Cell',
+        'RDW' => 'Red Cell Distribution Width',
+        'TRIG' => 'Triglycerides',
+        'UA' => 'Uric Acid',
+        'WBC' => 'White Blood Cell',
+        'CRP' => 'C-reactive protein',
+        'VIT-D' => 'Vitamin D',
+        'PTH' => 'Parathyroid hormone',
+        'APOB' => 'Apolipoprotein B',
+        'LDH' => 'Lactate Dehydrogenase',
+        'MG+' => 'Magnesium',
+        'GFR' => 'Glomerular Filtration Rate',
+        'IGF-1' => 'Insulin-like Growth Factor-1',
+        'C-PEPTIDE' => 'Connecting peptide',
+    ];
+
+    /**
+     * Biomarkers a user must have in their lab report, based on the package they bought:
+     * Comprehensive plan = all SenoClock biomarkers; Basic plan or no plan = the 20 required ones.
+     *
+     * @return array{plan: string, package_id: ?int, package_title: ?string, codes: string[]}
+     */
+    public function getRequiredBiomarkersForUser(int $userId, ?int $packageId = null): array
+    {
+        $package = null;
+        $packageTitle = null;
+
+        if ($packageId) {
+            // The plan the app says the user selected.
+            $package = \App\Models\MajorOrganPackage::find($packageId);
+            $packageTitle = $package->title ?? null;
+        } else {
+            // Latest paid plan purchase. The app saves plan purchases as "longevity" selections
+            // (older ones as "package"), each pointing at the bought package.
+            $selection = \App\Models\MajorOrganUserSelection::where('user_id', $userId)
+                ->whereIn('selection_type', ['package', 'longevity'])
+                ->whereNotNull('package_id')
+                ->where('payment_status', 1)
+                ->orderBy('id', 'desc')
+                ->first();
+
+            if ($selection) {
+                $package = \App\Models\MajorOrganPackage::find($selection->package_id);
+                $packageTitle = $package->title ?? $selection->package_title;
+                $packageId = (int) $selection->package_id;
+            }
+        }
+
+        if ($packageTitle !== null && stripos($packageTitle, 'comprehensive') !== false) {
+            // The 20 core biomarkers first, then the rest in reference order.
+            $codes = array_values(array_unique(array_merge(
+                self::REQUIRED_SENOCLOCK_BIOMARKERS,
+                array_keys(self::ALL_SENOCLOCK_BIOMARKER_NAMES)
+            )));
+
+            return ['plan' => 'comprehensive', 'package_id' => $packageId, 'package_title' => $packageTitle, 'codes' => $codes];
+        }
+
+        return [
+            'plan' => $packageTitle !== null ? 'basic' : 'default',
+            'package_id' => $packageTitle !== null ? $packageId : null,
+            'package_title' => $packageTitle,
+            'codes' => self::REQUIRED_SENOCLOCK_BIOMARKERS,
+        ];
+    }
+
+    /**
+     * Display name for any SenoClock biomarker code.
+     */
+    public static function biomarkerName(string $code): string
+    {
+        return self::REQUIRED_SENOCLOCK_BIOMARKER_NAMES[$code] ?? self::ALL_SENOCLOCK_BIOMARKER_NAMES[$code] ?? $code;
+    }
+
+    /**
      * Return the required SenoClock biomarkers missing from the given markers
      * (keyed by marker name/code). Markers with a non-numeric value count as missing.
      */
-    public function getMissingRequiredSenoclockMarkers(array $markers): array
+    public function getMissingRequiredSenoclockMarkers(array $markers, ?array $requiredCodes = null): array
     {
         $mapping = $this->getSenoclockMapping();
         $knownKeys = array_flip(array_values($mapping));
@@ -1723,7 +1881,7 @@ class SenoclockAiService
         }
 
         return array_values(array_filter(
-            self::REQUIRED_SENOCLOCK_BIOMARKERS,
+            $requiredCodes ?? self::REQUIRED_SENOCLOCK_BIOMARKERS,
             fn($key) => !isset($present[$key])
         ));
     }
@@ -1865,8 +2023,15 @@ class SenoclockAiService
             return $mapping[$nameNoParen];
         }
 
-        // Longest contained alias wins. Skip very short keys ("k","p","ast") for contains-matching
-        // so "fasting" does not map to AST and "like" does not map to K+.
+        // Different tests that contain a biomarker's name ("Indirect Bilirubin", "Absolute
+        // Neutrophil Count", "Non-HDL", "Urine Protein", "A/G Ratio") must not borrow its key.
+        if (preg_match('/\b(indirect|absolute|abs|non hdl|vldl|ratio|urine|urinary)\b|\ba\/g\b/', $name)) {
+            return null;
+        }
+
+        // Longest contained alias wins, matched on whole words so "ldl" is not found inside
+        // "vldl" nor "prot" inside "protein". Skip very short keys ("k","p","ast") for
+        // contains-matching so "fasting" does not map to AST and "like" does not map to K+.
         $bestKey = null;
         $bestLen = 0;
         foreach ($mapping as $mapKey => $senoKey) {
@@ -1875,9 +2040,10 @@ class SenoclockAiService
             if ($len < 4) {
                 continue;
             }
+            $pattern = '/(?<![a-z0-9])' . preg_quote($mapKey, '/') . '(?![a-z0-9])/';
             if (
-                str_contains($name, $mapKey) ||
-                ($nameNoParen !== '' && str_contains($nameNoParen, $mapKey))
+                preg_match($pattern, $name) ||
+                ($nameNoParen !== '' && preg_match($pattern, $nameNoParen))
             ) {
                 if ($len > $bestLen) {
                     $bestLen = $len;

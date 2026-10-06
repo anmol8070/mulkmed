@@ -2804,6 +2804,14 @@ Team Mulk Med.";
                 'sectionSequence' => $sectionSequence,
             ]);
         }
+
+        // Temporarily hide every dashboard card except AI scan, longevity, common health problems
+        // and Mulk Med virtual hospital doctors. Remove this filter to show all cards again.
+        $visibleSectionTypes = ['mulk_ai_vitals', 'mulk_longevity_lab_report', 'mulk_longevity_care', 'common_health_problems', 'mulk_med_virtual_hospital_doctors'];
+        $sections = $sections->filter(
+            fn($section) => in_array(strtolower((string) $section->section_type), $visibleSectionTypes, true)
+        )->values();
+
         foreach ($sections as $key => $sequence) {
             if($sequence->section_type == 'doctors_section')
             {
@@ -2935,53 +2943,54 @@ Team Mulk Med.";
                 }
             }
 
-            if($sequence->section_type == 'mulk_longevity_lab_report')
-            {
-                if ($hasBoughtLongevityPlan) {
-                    $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
-                                    ->where('is_deleted', 0)
-                                    ->get();
-                    if($labReportSection->isNotEmpty())
-                    {
-                        $sequence->section_data = $labReportSection;
-                        array_push($sectionSequence, $sequence);
-                    }
-                }
-            }
-
-            if($sequence->section_type == 'Mulk_Longevity_Care' || $sequence->section_type == 'mulk_longevity_care')
-            {
-                $section = DashboardBanners::where('name', 'Mulk Longevity Care')
-                                ->where('is_deleted', 0)
-                                ->get();
-                if ($section->isEmpty()) {
-                    $section = DashboardBanners::where('name', 'like', '%Longevity Care%')
-                                    ->where('is_deleted', 0)
-                                ->get();
-                }
-                if($section->isNotEmpty())
-                {
-                    $sequence->section_data = $section;
-                    array_push($sectionSequence,$sequence);
-                }
-
-                // Separate section for Mulk Longevity Lab Report
-                if ($hasBoughtLongevityPlan && !$sections->contains('section_type', 'mulk_longevity_lab_report'))
-                {
-                    $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
-                                    ->where('is_deleted', 0)
-                                    ->get();
-                    if($labReportSection->isNotEmpty())
-                    {
-                        $labSequence = clone $sequence;
-                        $labSequence->id = $sequence->id + 1000; // Give it a unique pseudo ID
-                        $labSequence->section_name = 'Mulk Longevity Lab Report';
-                        $labSequence->section_type = 'mulk_longevity_lab_report';
-                        $labSequence->section_data = $labReportSection;
-                        array_push($sectionSequence, $labSequence);
-                    }
-                }
-            }
+            // Longevity Lab Report and Longevity Care cards are now shown inside the appointment banner (see below).
+            // if($sequence->section_type == 'mulk_longevity_lab_report')
+            // {
+                // if ($hasBoughtLongevityPlan) {
+                    // $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
+                                    // ->where('is_deleted', 0)
+                                    // ->get();
+                    // if($labReportSection->isNotEmpty())
+                    // {
+                        // $sequence->section_data = $labReportSection;
+                        // array_push($sectionSequence, $sequence);
+                    // }
+                // }
+            // }
+            //
+            // if($sequence->section_type == 'Mulk_Longevity_Care' || $sequence->section_type == 'mulk_longevity_care')
+            // {
+                // $section = DashboardBanners::where('name', 'Mulk Longevity Care')
+                                // ->where('is_deleted', 0)
+                                // ->get();
+                // if ($section->isEmpty()) {
+                    // $section = DashboardBanners::where('name', 'like', '%Longevity Care%')
+                                    // ->where('is_deleted', 0)
+                                // ->get();
+                // }
+                // if($section->isNotEmpty())
+                // {
+                    // $sequence->section_data = $section;
+                    // array_push($sectionSequence,$sequence);
+                // }
+            //
+                // // Separate section for Mulk Longevity Lab Report
+                // if ($hasBoughtLongevityPlan && !$sections->contains('section_type', 'mulk_longevity_lab_report'))
+                // {
+                // $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
+                                // ->where('is_deleted', 0)
+                                // ->get();
+                // if($labReportSection->isNotEmpty())
+                // {
+                    // $labSequence = clone $sequence;
+                    // $labSequence->id = $sequence->id + 1000; // Give it a unique pseudo ID
+                    // $labSequence->section_name = 'Mulk Longevity Lab Report';
+                    // $labSequence->section_type = 'mulk_longevity_lab_report';
+                    // $labSequence->section_data = $labReportSection;
+                    // array_push($sectionSequence, $labSequence);
+                    // }
+                // }
+            // }
 
             if($sequence->section_type == "second_medical_openion")
             {
@@ -3373,48 +3382,77 @@ Team Mulk Med.";
             }
         }
 
-        if ($request->has('user_id')) {
-            $appointments = Appointments::where('user_id', $request->user_id)
-                ->where('status', Constants::orderAccepted)
-                ->orderBy('date', 'asc')
-                ->orderBy('time', 'asc')
-                ->get();
+        // Appointments are hidden from the appointment banner for now.
+        // if ($request->has('user_id')) {
+        //     $appointments = Appointments::where('user_id', $request->user_id)
+        //         ->where('status', Constants::orderAccepted)
+        //         ->orderBy('date', 'asc')
+        //         ->orderBy('time', 'asc')
+        //         ->get();
+        //
+        //     if ($appointments->count()) {
+        //         $appointmentsWithJitsi = [];
+        //
+        //         foreach ($appointments as $appointment) {
+        //             $jitsi_meeting = JitsiMeeting::where('appointment_id', $appointment->id)->first();
+        //             if ($jitsi_meeting) {
+        //                 $appointment->jitsi_link = url("/api/v1/join_jitsi_meeting?user_id={$appointment->user_id}&room={$jitsi_meeting->room}");;
+        //                 $appointment->image = asset('storage/uploads/dashboard_appointment_banner.png');
+        //                 $appointmentsWithJitsi[] = $appointment;
+        //             }
+        //
+        //             $vital_scan = AI_Vital::where('user_id',$request->user_id)->where('appointment_id',$appointment->id)->get();
+        //             $isVitalScanDone = 0;
+        //
+        //             if(count($vital_scan)){
+        //                 $isVitalScanDone = 1;
+        //             }
+        //             $appointment->is_vital_scan_done = $isVitalScanDone;
+        //         }
+        //
+        //         if (count($appointmentsWithJitsi)) {
+        //             $appointmentBanner = new \stdClass();
+        //             $appointmentBanner->id = 2;
+        //             $appointmentBanner->section_name = "appointment_banner";
+        //             $appointmentBanner->section_type = "appointment_banner";
+        //             $appointmentBanner->section_data = $appointmentsWithJitsi;
+        //
+        //             array_splice($sectionSequence, 1, 0, [$appointmentBanner]);
+        //
+        //             foreach ($sectionSequence as $index => $sec) {
+        //                 $sec->id = $index + 1;
+        //             }
+        //         }
+        //     }
+        //
+        // }
 
-            if ($appointments->count()) {
-                $appointmentsWithJitsi = [];
+        // Appointment banner shows the Mulk Longevity Lab Report card (only for users who
+        // bought a longevity plan) and the Mulk Longevity Care card.
+        $appointmentBannerCards = collect();
+        if ($hasBoughtLongevityPlan) {
+            $appointmentBannerCards = $appointmentBannerCards->merge(
+                DashboardBanners::where('name', 'Mulk Longevity Lab Report')->where('is_deleted', 0)->get()
+            );
+        }
+        $longevityCareCards = DashboardBanners::where('name', 'Mulk Longevity Care')->where('is_deleted', 0)->get();
+        if ($longevityCareCards->isEmpty()) {
+            $longevityCareCards = DashboardBanners::where('name', 'like', '%Longevity Care%')->where('is_deleted', 0)->get();
+        }
+        $appointmentBannerCards = $appointmentBannerCards->merge($longevityCareCards)->values();
 
-                foreach ($appointments as $appointment) {
-                    $jitsi_meeting = JitsiMeeting::where('appointment_id', $appointment->id)->first();
-                    if ($jitsi_meeting) {
-                        $appointment->jitsi_link = url("/api/v1/join_jitsi_meeting?user_id={$appointment->user_id}&room={$jitsi_meeting->room}");;
-                        $appointment->image = asset('storage/uploads/dashboard_appointment_banner.png');
-                        $appointmentsWithJitsi[] = $appointment;
-                    }
+        if ($appointmentBannerCards->isNotEmpty()) {
+            $appointmentBanner = new \stdClass();
+            $appointmentBanner->id = 2;
+            $appointmentBanner->section_name = "appointment_banner";
+            $appointmentBanner->section_type = "appointment_banner";
+            $appointmentBanner->section_data = $appointmentBannerCards;
 
-                    $vital_scan = AI_Vital::where('user_id',$request->user_id)->where('appointment_id',$appointment->id)->get();
-                    $isVitalScanDone = 0;
+            array_splice($sectionSequence, 1, 0, [$appointmentBanner]);
 
-                    if(count($vital_scan)){
-                        $isVitalScanDone = 1;
-                    }
-                    $appointment->is_vital_scan_done = $isVitalScanDone;
-                }
-
-                if (count($appointmentsWithJitsi)) {
-                    $appointmentBanner = new \stdClass();
-                    $appointmentBanner->id = 2;
-                    $appointmentBanner->section_name = "appointment_banner";
-                    $appointmentBanner->section_type = "appointment_banner";
-                    $appointmentBanner->section_data = $appointmentsWithJitsi;
-
-                    array_splice($sectionSequence, 1, 0, [$appointmentBanner]);
-
-                    foreach ($sectionSequence as $index => $sec) {
-                        $sec->id = $index + 1;
-                    }
-                }
+            foreach ($sectionSequence as $index => $sec) {
+                $sec->id = $index + 1;
             }
-
         }
 
 

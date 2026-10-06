@@ -1,6 +1,6 @@
 @extends('include.app')
 @section('header')
-    <script src="{{ asset('asset/script/majorOrganTests.js') }}?v=1.1"></script>
+    <script src="{{ asset('asset/script/majorOrganTests.js') }}?v=1.4"></script>
 @endsection
 
 @section('content')
@@ -95,6 +95,8 @@
             <h4>{{ __('Major Organ Tests') }}</h4>
             <a data-toggle="modal" data-target="#addOrganTestModal" href=""
                 class="ml-auto btn btn-primary text-white">{{ __('Add Organ Test') }}</a>
+            <a href="#" id="addPackageBtn"
+                class="ml-auto btn btn-primary text-white d-none">{{ __('Add Package') }}</a>
         </div>
         <div class="card-body">
             <ul class="nav nav-pills border-b mb-3 ml-0">
@@ -130,59 +132,23 @@
                 </div>
 
                 <div role="tabpanel" class="tab-pane" id="SectionPackage">
-                    <div class="col-12 col-lg-8">
-                        <p class="text-muted">{{ __('Only one package record is allowed. Saving will create or update that single package.') }}</p>
-                        <form action="" method="post" enctype="multipart/form-data" id="packageForm" autocomplete="off">
-                            @csrf
-                            <input type="hidden" name="id" id="packageId">
-
-                            <div class="form-group">
-                                <label>{{ __('Package Title') }}</label>
-                                <input type="text" id="packageTitle" name="title" class="form-control" required
-                                    placeholder="e.g. Comprehensive Mulk Longevity">
-                            </div>
-
-                            <div class="form-group">
-                                <label>{{ __('Badge') }}</label>
-                                <input type="text" id="packageBadge" name="badge" class="form-control"
-                                    placeholder="e.g. High Recommended">
-                            </div>
-
-                            <div class="form-group">
-                                <label>{{ __('Description') }}</label>
-                                <textarea id="packageDescription" name="description" class="form-control" rows="4"></textarea>
-                            </div>
-
-                            <div class="form-group">
-                                <label>{{ __('Package Price') }}</label>
-                                <input type="number" step="0.01" min="0" id="packagePrice" name="price" class="form-control" required>
-                            </div>
-
-                            <div class="form-group">
-                                <label>{{ __('Package Image') }} <small class="text-muted">({{ __('optional') }})</small></label>
-                                <input id="packageImage" type="file" name="image" accept="image/*" class="form-control">
-                                <div class="mt-3">
-                                    <label>{{ __('Image Preview') }}</label>
-                                    <img id="packagePreviewImage" src="http://placehold.jp/120x120.png" alt="Preview"
-                                        style="width:120px;height:120px;display:block;border:1px solid #ccc;border-radius:6px;object-fit:cover;">
-                                </div>
-                            </div>
-
-                            <div class="form-group">
-                                <label>{{ __('Status') }}</label>
-                                <select id="packageStatus" name="status" class="form-control" required>
-                                    <option value="1">{{ __('Active') }}</option>
-                                    <option value="0">{{ __('Inactive') }}</option>
-                                </select>
-                            </div>
-
-                            <div class="form-group d-flex align-items-center">
-                                <input id="packageSubmitBtn" class="btn btn-primary mr-2" type="submit" value="{{ __('Save Package') }}">
-                                <div id="packageFormLoader" class="d-none">
-                                    <div class="spinner-border text-primary" role="status" style="width: 1.2rem; height: 1.2rem;"></div>
-                                </div>
-                            </div>
-                        </form>
+                    <div class="col-12">
+                        <div class="table-responsive mb-4">
+                            <table class="table table-striped w-100" id="packagesTable">
+                                <thead>
+                                    <tr>
+                                        <th>{{ __('Image') }}</th>
+                                        <th>{{ __('Package Title') }}</th>
+                                        <th>{{ __('Badge') }}</th>
+                                        <th>{{ __('Price') }}</th>
+                                        <th>{{ __('Included Tests') }}</th>
+                                        <th>{{ __('Status') }}</th>
+                                        <th>{{ __('Action') }}</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
@@ -191,6 +157,83 @@
                         <p class="text-muted">{{ __('This preview shows how active organ tests will appear on the frontend.') }}</p>
                         <div id="frontendPreviewContainer"></div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="packageModal" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 id="packageFormTitle">{{ __('Add Package') }}</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <form action="" method="post" enctype="multipart/form-data" id="packageForm" autocomplete="off">
+                        @csrf
+                        <input type="hidden" name="id" id="packageId">
+
+                        <div class="form-group">
+                            <label>{{ __('Package Title') }}</label>
+                            <input type="text" id="packageTitle" name="title" class="form-control" required
+                                placeholder="e.g. Comprehensive Mulk Longevity">
+                        </div>
+
+                        <div class="form-group">
+                            <label>{{ __('Badge') }}</label>
+                            <input type="text" id="packageBadge" name="badge" class="form-control"
+                                placeholder="e.g. High Recommended">
+                        </div>
+
+                        <div class="form-group">
+                            <label>{{ __('Description') }}</label>
+                            <textarea id="packageDescription" name="description" class="form-control" rows="4"></textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label>{{ __('Package Price') }}</label>
+                            <input type="number" step="0.01" min="0" id="packagePrice" name="price" class="form-control" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label>{{ __('Package Image') }} <small class="text-muted">({{ __('optional') }})</small></label>
+                            <input id="packageImage" type="file" name="image" accept="image/*" class="form-control">
+                            <div class="mt-3">
+                                <label>{{ __('Image Preview') }}</label>
+                                <img id="packagePreviewImage" src="http://placehold.jp/120x120.png" alt="Preview"
+                                    style="width:120px;height:120px;display:block;border:1px solid #ccc;border-radius:6px;object-fit:cover;">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>{{ __('Included Tests') }}
+                                <small class="text-muted">({{ __('none selected = all active tests') }})</small></label>
+                            <div class="mb-2">
+                                <a href="#" id="packageTestsSelectAll" class="mr-3">{{ __('Select all') }}</a>
+                                <a href="#" id="packageTestsClear">{{ __('Clear') }}</a>
+                            </div>
+                            <div id="packageTestsList" class="border rounded p-2"
+                                style="max-height:220px;overflow-y:auto;columns:2;"></div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>{{ __('Status') }}</label>
+                            <select id="packageStatus" name="status" class="form-control" required>
+                                <option value="1">{{ __('Active') }}</option>
+                                <option value="0">{{ __('Inactive') }}</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group d-flex align-items-center">
+                            <input id="packageSubmitBtn" class="btn btn-primary mr-2" type="submit" value="{{ __('Save Package') }}">
+                            <div id="packageFormLoader" class="d-none">
+                                <div class="spinner-border text-primary" role="status" style="width: 1.2rem; height: 1.2rem;"></div>
+                            </div>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>

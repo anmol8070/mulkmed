@@ -617,6 +617,8 @@ Route::prefix('majorOrganTests')->name('majorOrganTests.')->group(function () {
     Route::get('preview', [MajorOrganTestController::class, 'previewOrganTests'])->middleware(['checkLogin'])->name('preview');
     Route::get('package', [MajorOrganTestController::class, 'getPackage'])->middleware(['checkLogin'])->name('package.get');
     Route::post('package', [MajorOrganTestController::class, 'savePackage'])->middleware(['checkLogin'])->name('package.save');
+    Route::get('package/list', [MajorOrganTestController::class, 'listPackages'])->middleware(['checkLogin'])->name('package.list');
+    Route::get('package/delete/{id}', [MajorOrganTestController::class, 'deletePackage'])->middleware(['checkLogin'])->name('package.delete');
 });
 
 // Longevity Plans

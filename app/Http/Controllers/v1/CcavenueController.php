@@ -1499,7 +1499,7 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                     }
                     if ($package) {
                         $selectedPackageRecord = $package;
-                        $allTests = \App\Models\MajorOrganTest::where('status', 1)->get();
+                        $allTests = $package->includedTests();
                         $pkgBiomarkers = [];
                         foreach ($allTests as $t) {
                             $bms = is_array($t->biomarkers) ? $t->biomarkers : [];
@@ -1533,7 +1533,7 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
 
                     if (($actualReportFrom === 'package' || $request->report_from === 'package') && $package && empty($packageIds)) {
                         $selectedPackageRecord = $package;
-                        $allTests = \App\Models\MajorOrganTest::where('status', 1)->get();
+                        $allTests = $package->includedTests();
                         $pkgBiomarkers = [];
                         foreach ($allTests as $t) {
                             $bms = is_array($t->biomarkers) ? $t->biomarkers : [];
@@ -1647,7 +1647,10 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                     $selection->selected_biomarkers = $combinedBiomarkers;
 
                     if ($selectedPackageRecord || $actualReportFrom === 'package' || !empty($packageIds) || (float)$amount == 599.00) {
-                        $allTestsCount = \App\Models\MajorOrganTest::where('status', 1)->count();
+                        // The bought package's own tests (Basic = 20, Comprehensive = all).
+                        $allTestsCount = $selectedPackageRecord
+                            ? $selectedPackageRecord->includedTests()->count()
+                            : \App\Models\MajorOrganTest::where('status', 1)->count();
                         $selection->organ_health_check_count = $allTestsCount > 0 ? $allTestsCount : 10;
                         $selection->total_biomarkers = count($combinedBiomarkers) > 0 ? count($combinedBiomarkers) : 41;
                     } else {
