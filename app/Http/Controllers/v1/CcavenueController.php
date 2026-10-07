@@ -1144,6 +1144,8 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                 ]
             ]);
         }
+        //for bypass payment
+       // else if(($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanBeforePaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMesaBeforeChatPayment) || ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType)){
 
         else if(($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueAIVitalScanBeforePaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMesaBeforeChatPayment) || ($responseData['merchant_param5'] == Constants::CCAvenueLongevityPaymentType) || ($responseData['merchant_param5'] == Constants::CCAvenueMajorOrganPaymentType)){
             $ai_vital_misa = AIVitalScanMisa::where('order_id', $responseData['order_id'])->first();
@@ -1186,38 +1188,7 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                         }
 
                         // 2. Create UserLongevityPlan entry as ONE SINGLE ROW
-                        $planIdsString = $responseData['merchant_param4'] ?? ($selection->plan_id ?? ($ai_vital_misa->plan_id ?? null));
-                        if ($planIdsString) {
-                            $planIds = array_values(array_filter(array_map('trim', explode(',', $planIdsString))));
-                            $combinedPlanIdsStr = implode(',', $planIds);
-                            
-                            $maxExpiryDays = 0;
-                            foreach ($planIds as $pid) {
-                                $longevityPlan = LongevityPlan::find($pid);
-                                if ($longevityPlan && !empty($longevityPlan->plan_expiry_days)) {
-                                    $maxExpiryDays = max($maxExpiryDays, (int)$longevityPlan->plan_expiry_days);
-                                }
-                            }
-
-                            $expiryDate = $maxExpiryDays > 0 ? \Carbon\Carbon::now()->addDays($maxExpiryDays)->format('Y-m-d') : null;
-
-                            UserLongevityPlan::updateOrCreate(
-                                ['order_id' => $responseData['order_id']],
-                                [
-                                    'user_id' => $ai_vital_misa->user_id,
-                                    'plan_id' => $combinedPlanIdsStr,
-                                    'amount' => $responseData['amount'],
-                                    'status' => 1,
-                                    'expiry_date' => $expiryDate,
-                                ]
-                            );
-
-                            Log::info('successAIVitalScan: stored single combined UserLongevityPlan in DB', [
-                                'order_id' => $responseData['order_id'],
-                                'plan_id' => $combinedPlanIdsStr,
-                                'user_id' => $ai_vital_misa->user_id,
-                            ]);
-                        }
+                        $this->storePaidUserLongevityPlan($responseData, $ai_vital_misa->user_id, $selection);
                     }
                 }
 
@@ -1467,6 +1438,7 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
             // Process and save selections
             $hasItemsToSave = !empty($longevityPlanIds) || !empty($packageIds) || !empty($planIds);
             $selectedPackageRecord = null;
+            //for bypass below 2
             $combinedPlanIdsString = null;
             $longevityPlanIdsString = null;
 
@@ -1709,6 +1681,8 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                 . '&merchant_param4=' . urlencode((string) $merchantParam4)
                 . '&amount=' . urlencode(number_format($amount, 2, '.', ''))
             );
+            // $payment_url = env('CCAVENUE_BASE_URL') . "=$encrypted_data&access_code=" . env('CCAVENUE_ACCESS_CODE');
+
 
             return response()->json([
                 'status' => true,
@@ -2372,71 +2346,7 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                         }
 
                         // 2. Process Longevity Plan / Major Organ DB entries as ONE SINGLE ROW for UserLongevityPlan & AI_Vital
-                        $param4Str = trim((string)($responseData['merchant_param4'] ?? ''));
-                        
-                        $userLongevityPlan = \App\Models\UserLongevityPlan::where('order_id', $responseData['order_id'])->first();
-                        
-                        $targetPlanIdsStr = $userLongevityPlan ? ($userLongevityPlan->longevity_plan_ids ?? $userLongevityPlan->plan_id) : ($selection ? ($selection->longevity_plan_ids ?? $selection->plan_id) : $param4Str);
-
-                        $planIds = array_values(array_filter(array_map('trim', explode(',', (string)($targetPlanIdsStr ?? '')))));
-                        $combinedPlanIdsStr = !empty($planIds) ? implode(',', $planIds) : ($targetPlanIdsStr !== '' ? $targetPlanIdsStr : null);
-
-                        $maxExpiryDays = 0;
-                        foreach ($planIds as $pid) {
-                            $longevityPlan = LongevityPlan::find($pid);
-                            if ($longevityPlan && !empty($longevityPlan->plan_expiry_days)) {
-                                $maxExpiryDays = max($maxExpiryDays, (int)$longevityPlan->plan_expiry_days);
-                            }
-                        }
-
-                        $expiryDate = $maxExpiryDays > 0 ? \Carbon\Carbon::now()->addDays($maxExpiryDays)->format('Y-m-d') : null;
-
-                        if ($userLongevityPlan) {
-                            $userLongevityPlan->status = 1; // 1 = active / paid
-                            $userLongevityPlan->amount = $responseData['amount'] ?? $userLongevityPlan->amount;
-                            if ($expiryDate) {
-                                $userLongevityPlan->expiry_date = $expiryDate;
-                            }
-                            $userLongevityPlan->save();
-
-                            Log::info('Longevity payment success: updated existing UserLongevityPlan to active/paid in DB', [
-                                'order_id' => $responseData['order_id'],
-                                'id' => $userLongevityPlan->id,
-                                'user_id' => $userLongevityPlan->user_id,
-                                'status' => 1,
-                                'expiry_date' => $expiryDate,
-                            ]);
-                        } else {
-                            $userLongevityPayload = [
-                                'user_id' => $ai_vital_misa->user_id,
-                                'plan_id' => $selection ? $selection->plan_id : null,
-                                'amount' => $responseData['amount'],
-                                'status' => 1,
-                                'expiry_date' => $expiryDate,
-                            ];
-
-                            if (Schema::hasColumn('user_longevity_plans', 'longevity_plan_ids')) {
-                                $userLongevityPayload['longevity_plan_ids'] = $selection ? $selection->longevity_plan_ids : ($param4Str !== '' ? $param4Str : null);
-                            }
-                            if (Schema::hasColumn('user_longevity_plans', 'package_id')) {
-                                $userLongevityPayload['package_id'] = $selection ? $selection->package_id : null;
-                            }
-
-                            UserLongevityPlan::updateOrCreate(
-                                ['order_id' => $responseData['order_id']],
-                                $userLongevityPayload
-                            );
-
-                            Log::info('Longevity payment success: stored single combined UserLongevityPlan in DB', [
-                                'order_id' => $responseData['order_id'],
-                                'plan_id' => $userLongevityPayload['plan_id'] ?? null,
-                                'longevity_plan_ids' => $userLongevityPayload['longevity_plan_ids'] ?? null,
-                                'package_id' => $userLongevityPayload['package_id'] ?? null,
-                                'user_id' => $ai_vital_misa->user_id,
-                                'status' => 1,
-                                'expiry_date' => $expiryDate,
-                            ]);
-                        }
+                        $combinedPlanIdsStr = $this->storePaidUserLongevityPlan($responseData, $ai_vital_misa->user_id, $selection);
 
                         \App\Models\AI_Vital::create([
                             'user_id' => $ai_vital_misa->user_id,
@@ -2934,6 +2844,54 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
         }
 
         return response('OK', 200);
+    }
+
+    /**
+     * Marks a paid longevity / major organ order in user_longevity_plans:
+     * retreat plans go in longevity_plan_ids, a bought package in package_id and
+     * organ test ids in plan_id. Returns the plan ids stored for the AI_Vital row.
+     */
+    private function storePaidUserLongevityPlan($responseData, $userId, $selection = null): ?string
+    {
+        $orderId = $responseData['order_id'];
+        $param4 = trim((string) ($responseData['merchant_param4'] ?? ''));
+
+        // A pending row exists when retreat plans (longevity_plan_ids) were bought at checkout.
+        $userPlan = UserLongevityPlan::where('order_id', $orderId)->first();
+
+        $longevityPlanIds = $userPlan ? ($userPlan->longevity_plan_ids ?: $userPlan->plan_id) : null;
+        $packageId = $selection->package_id ?? ($userPlan->package_id ?? null);
+        $testIds = $selection->plan_id ?? null;
+        if (!$userPlan && !$selection && $param4 !== '') {
+            // No checkout record: keep the old behaviour of storing merchant_param4.
+            $testIds = $param4;
+        }
+
+        // Only retreat plans have a validity period; packages and tests do not expire.
+        $maxExpiryDays = 0;
+        foreach (array_filter(array_map('trim', explode(',', (string) $longevityPlanIds))) as $pid) {
+            $longevityPlan = LongevityPlan::find($pid);
+            if ($longevityPlan && !empty($longevityPlan->plan_expiry_days)) {
+                $maxExpiryDays = max($maxExpiryDays, (int) $longevityPlan->plan_expiry_days);
+            }
+        }
+        $expiryDate = $maxExpiryDays > 0 ? Carbon::now()->addDays($maxExpiryDays)->format('Y-m-d') : null;
+
+        $payload = [
+            'user_id' => $userId,
+            'plan_id' => $longevityPlanIds ?: $testIds,
+            'longevity_plan_ids' => $longevityPlanIds,
+            'package_id' => $packageId,
+            'amount' => $responseData['amount'] ?? ($userPlan->amount ?? 0),
+            'status' => 1,
+            'expiry_date' => $expiryDate,
+        ];
+
+        UserLongevityPlan::updateOrCreate(['order_id' => $orderId], $payload);
+
+        Log::info('Longevity payment success: stored UserLongevityPlan in DB', ['order_id' => $orderId] + $payload);
+
+        return $payload['plan_id'];
     }
 
     function convertInrToAed($amountInINR)

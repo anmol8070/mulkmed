@@ -2478,21 +2478,12 @@ Team Mulk Med.";
         $hasBoughtLongevityPlan = false;
         $userId = $request->user_id ?? $request->query('user_id');
         if (!empty($userId)) {
-            $hasUserPlan = UserLongevityPlan::where('user_id', $userId)
-                ->whereNotIn('status', ['expired', 0, '0', 'cancelled', 'failed'])
-                ->where(function($q) {
-                    $q->whereNull('expiry_date')
-                      ->orWhere('expiry_date', '>=', Carbon::today()->toDateString());
-                })
+            // A plan is bought when major_organ_user_selections has a paid plan purchase
+            // (unpaid checkouts have payment_status 0).
+            $hasBoughtLongevityPlan = MajorOrganUserSelection::where('user_id', $userId)
+                ->whereIn('selection_type', ['longevity', 'package'])
+                ->where('payment_status', 1)
                 ->exists();
-
-            $hasMajorOrganSelection = MajorOrganUserSelection::where('user_id', $userId)
-                ->where('selection_type', 'longevity')
-                ->exists();
-
-            if ($hasUserPlan || $hasMajorOrganSelection) {
-                $hasBoughtLongevityPlan = true;
-            }
         }
 
         $hostAndConversionRate = Helpers::conversionRate();
@@ -2943,54 +2934,54 @@ Team Mulk Med.";
                 }
             }
 
-            // Longevity Lab Report and Longevity Care cards are now shown inside the appointment banner (see below).
-            // if($sequence->section_type == 'mulk_longevity_lab_report')
-            // {
-                // if ($hasBoughtLongevityPlan) {
-                    // $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
-                                    // ->where('is_deleted', 0)
-                                    // ->get();
-                    // if($labReportSection->isNotEmpty())
-                    // {
-                        // $sequence->section_data = $labReportSection;
-                        // array_push($sectionSequence, $sequence);
-                    // }
-                // }
-            // }
-            //
-            // if($sequence->section_type == 'Mulk_Longevity_Care' || $sequence->section_type == 'mulk_longevity_care')
-            // {
-                // $section = DashboardBanners::where('name', 'Mulk Longevity Care')
-                                // ->where('is_deleted', 0)
-                                // ->get();
-                // if ($section->isEmpty()) {
-                    // $section = DashboardBanners::where('name', 'like', '%Longevity Care%')
-                                    // ->where('is_deleted', 0)
-                                // ->get();
-                // }
-                // if($section->isNotEmpty())
-                // {
-                    // $sequence->section_data = $section;
-                    // array_push($sectionSequence,$sequence);
-                // }
-            //
-                // // Separate section for Mulk Longevity Lab Report
-                // if ($hasBoughtLongevityPlan && !$sections->contains('section_type', 'mulk_longevity_lab_report'))
-                // {
-                // $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
-                                // ->where('is_deleted', 0)
-                                // ->get();
-                // if($labReportSection->isNotEmpty())
-                // {
-                    // $labSequence = clone $sequence;
-                    // $labSequence->id = $sequence->id + 1000; // Give it a unique pseudo ID
-                    // $labSequence->section_name = 'Mulk Longevity Lab Report';
-                    // $labSequence->section_type = 'mulk_longevity_lab_report';
-                    // $labSequence->section_data = $labReportSection;
-                    // array_push($sectionSequence, $labSequence);
-                    // }
-                // }
-            // }
+            // Mulk Longevity Lab Report card: only for users who bought a longevity plan.
+            if($sequence->section_type == 'mulk_longevity_lab_report')
+            {
+                if ($hasBoughtLongevityPlan) {
+                    $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
+                                    ->where('is_deleted', 0)
+                                    ->get();
+                    if($labReportSection->isNotEmpty())
+                    {
+                        $sequence->section_data = $labReportSection;
+                        array_push($sectionSequence, $sequence);
+                    }
+                }
+            }
+
+            if($sequence->section_type == 'Mulk_Longevity_Care' || $sequence->section_type == 'mulk_longevity_care')
+            {
+                $section = DashboardBanners::where('name', 'Mulk Longevity Care')
+                                ->where('is_deleted', 0)
+                                ->get();
+                if ($section->isEmpty()) {
+                    $section = DashboardBanners::where('name', 'like', '%Longevity Care%')
+                                    ->where('is_deleted', 0)
+                                ->get();
+                }
+                if($section->isNotEmpty())
+                {
+                    $sequence->section_data = $section;
+                    array_push($sectionSequence,$sequence);
+                }
+
+                // Separate section for Mulk Longevity Lab Report (only for users who bought a plan)
+                if ($hasBoughtLongevityPlan && !$sections->contains('section_type', 'mulk_longevity_lab_report'))
+                {
+                $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
+                                ->where('is_deleted', 0)
+                                ->get();
+                if($labReportSection->isNotEmpty())
+                {
+                    $labSequence = clone $sequence;
+                    $labSequence->id = $sequence->id + 1000; // Give it a unique pseudo ID
+                    $labSequence->section_name = 'Mulk Longevity Lab Report';
+                    $labSequence->section_type = 'mulk_longevity_lab_report';
+                    $labSequence->section_data = $labReportSection;
+                    array_push($sectionSequence, $labSequence);
+                    }
+                }
+            }
 
             if($sequence->section_type == "second_medical_openion")
             {
@@ -3427,32 +3418,24 @@ Team Mulk Med.";
         //
         // }
 
-        // Appointment banner shows the Mulk Longevity Lab Report card (only for users who
-        // bought a longevity plan) and the Mulk Longevity Care card.
-        $appointmentBannerCards = collect();
-        if ($hasBoughtLongevityPlan) {
-            $appointmentBannerCards = $appointmentBannerCards->merge(
-                DashboardBanners::where('name', 'Mulk Longevity Lab Report')->where('is_deleted', 0)->get()
-            );
-        }
-        $longevityCareCards = DashboardBanners::where('name', 'Mulk Longevity Care')->where('is_deleted', 0)->get();
-        if ($longevityCareCards->isEmpty()) {
-            $longevityCareCards = DashboardBanners::where('name', 'like', '%Longevity Care%')->where('is_deleted', 0)->get();
-        }
-        $appointmentBannerCards = $appointmentBannerCards->merge($longevityCareCards)->values();
-
-        if ($appointmentBannerCards->isNotEmpty()) {
-            $appointmentBanner = new \stdClass();
-            $appointmentBanner->id = 2;
-            $appointmentBanner->section_name = "appointment_banner";
-            $appointmentBanner->section_type = "appointment_banner";
-            $appointmentBanner->section_data = $appointmentBannerCards;
-
-            array_splice($sectionSequence, 1, 0, [$appointmentBanner]);
-
+        // Show the Mulk Longevity Care and Mulk Longevity Lab Report cards in the appointment
+        // banner's spot (from the second position), keeping their own section_type so the app
+        // renders them as banner cards.
+        $longevityCards = [];
+        foreach (['mulk_longevity_care', 'mulk_longevity_lab_report'] as $longevityType) {
             foreach ($sectionSequence as $index => $sec) {
-                $sec->id = $index + 1;
+                if (strtolower((string) $sec->section_type) === $longevityType) {
+                    $longevityCards[] = $sec;
+                    array_splice($sectionSequence, $index, 1);
+                    break;
+                }
             }
+        }
+        if (!empty($longevityCards)) {
+            array_splice($sectionSequence, min(1, count($sectionSequence)), 0, $longevityCards);
+        }
+        foreach ($sectionSequence as $index => $sec) {
+            $sec->id = $index + 1;
         }
 
 

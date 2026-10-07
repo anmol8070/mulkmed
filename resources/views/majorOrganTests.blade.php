@@ -1,6 +1,6 @@
 @extends('include.app')
 @section('header')
-    <script src="{{ asset('asset/script/majorOrganTests.js') }}?v=1.4"></script>
+    <script src="{{ asset('asset/script/majorOrganTests.js') }}?v=1.5"></script>
 @endsection
 
 @section('content')
@@ -119,7 +119,6 @@
                                 <tr>
                                     <th>{{ __('Icon') }}</th>
                                     <th>{{ __('Organ Test Name') }}</th>
-                                    <th>{{ __('Total Price') }}</th>
                                     <th>{{ __('Biomarkers') }}</th>
                                     <th>{{ __('Status') }}</th>
                                     <th>{{ __('Display Order') }}</th>
@@ -269,11 +268,6 @@
                         </div>
 
                         <div class="form-group">
-                            <label>{{ __('Total Price') }}</label>
-                            <input type="number" step="0.01" min="0" id="editPrice" name="price" class="form-control" required>
-                        </div>
-
-                        <div class="form-group">
                             <label>{{ __('Biomarkers') }}</label>
                             <div id="editBiomarkersContainer"></div>
                             <button type="button" class="btn btn-outline-primary btn-sm mt-2 add-biomarker-btn" data-target="#editBiomarkersContainer">
@@ -332,11 +326,6 @@
                                 <img id="addPreviewIcon" src="http://placehold.jp/120x120.png" alt="Preview"
                                     style="width:120px;height:120px;display:block;border:1px solid #ccc;border-radius:6px;object-fit:cover;">
                             </div>
-                        </div>
-
-                        <div class="form-group">
-                            <label>{{ __('Total Price') }}</label>
-                            <input type="number" step="0.01" min="0" name="price" class="form-control" required>
                         </div>
 
                         <div class="form-group">

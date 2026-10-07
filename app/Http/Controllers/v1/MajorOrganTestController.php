@@ -320,7 +320,6 @@ class MajorOrganTestController extends Controller
                     'id' => $test?->id,
                     'code' => $code,
                     'name' => \App\Services\SenoclockAiService::biomarkerName($code),
-                    'price' => number_format((float) ($test?->price ?? 0), 2, '.', ''),
                     'biomarkers' => $test && is_array($test->biomarkers) ? $test->biomarkers : [$code],
                     'is_required' => true,
                 ];
@@ -341,6 +340,8 @@ class MajorOrganTestController extends Controller
                 if (isset($usedTestIds[$item['id'] ?? null]) || !$isInPlan($item['id'] ?? null)) {
                     continue;
                 }
+                // Organ tests no longer have a price, so it is not shown.
+                unset($item['price']);
                 $missingOtherItems[] = array_merge($item, ['is_required' => false]);
             }
             $missingAll = array_merge($missingRequiredItems, $missingOtherItems);
