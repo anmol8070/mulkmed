@@ -114,6 +114,7 @@ $(document).ready(function () {
                             <span>${$("<div>").text(test.name).html()}</span>
                         </div>
                         <div class="organ-test-preview-meta">
+                            <div class="organ-test-preview-price">$${test.price}</div>
                             <div class="organ-test-preview-count">${test.biomarker_count} Biomarkers</div>
                         </div>
                     </div>
@@ -149,7 +150,7 @@ $(document).ready(function () {
         columnDefs: [
             {
                 orderable: false,
-                targets: [0, 2, 5],
+                targets: [2, 5],
             },
         ],
         ajax: {
@@ -604,6 +605,7 @@ $(document).ready(function () {
 
         $("#editOrganTestId").val(id);
         $("#editName").val($(this).data("name"));
+        $("#editPrice").val($(this).data("price"));
         $("#editStatus").val(String($(this).data("status")));
         $("#editDisplayOrder").val($(this).data("display_order"));
         $("#editPreviewIcon").attr("src", $(this).data("icon") || placeholderIcon);

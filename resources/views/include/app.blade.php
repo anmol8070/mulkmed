@@ -734,7 +734,7 @@
                         </li> -->
                         {{-- @endif --}}
                         @if ($section('mulk_longevity'))
-                        <li class="dropdown sideBarli menu-mulk-longevity {{ request()->routeIs('majorOrganTests.index', 'longevityPlans.index') ? 'active' : '' }}">
+                        <li class="dropdown sideBarli menu-mulk-longevity {{ request()->routeIs('majorOrganTests.index', 'longevityPlans.index', 'homeSampleCollections.index', 'homeSampleCollections.labs.index') ? 'active' : '' }}">
                             <a href="#" class="nav-link has-dropdown"><i class="fas fa-heartbeat"></i><span>{{ __('Mulk Longevity') }}</span></a>
                             <ul class="dropdown-menu">
                                 @if ($can('mulk_longevity.major_organ_tests'))
@@ -745,6 +745,16 @@
                                 @if ($can('mulk_longevity.longevity_plans'))
                                 <li class="longevityPlansSideA {{ request()->routeIs('longevityPlans.index') ? 'active' : '' }}">
                                     <a href="{{ route('longevityPlans.index') }}" class="nav-link"><i class="fas fa-spa"></i> {{ __('Longevity Plans') }}</a>
+                                </li>
+                                @endif
+                                @if ($can('mulk_longevity.home_sample_collections'))
+                                <li class="homeSampleCollectionsSideA {{ request()->routeIs('homeSampleCollections.index') ? 'active' : '' }}">
+                                    <a href="{{ route('homeSampleCollections.index') }}" class="nav-link"><i class="fas fa-vial"></i> {{ __('Home Sample Collections') }}</a>
+                                </li>
+                                @endif
+                                @if ($can('mulk_longevity.home_sample_labs'))
+                                <li class="homeSampleLabsSideA {{ request()->routeIs('homeSampleCollections.labs.index') ? 'active' : '' }}">
+                                    <a href="{{ route('homeSampleCollections.labs.index') }}" class="nav-link"><i class="fas fa-flask"></i> {{ __('Sample Collection Labs') }}</a>
                                 </li>
                                 @endif
                             </ul>

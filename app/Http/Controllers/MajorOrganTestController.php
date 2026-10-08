@@ -19,13 +19,13 @@ class MajorOrganTestController extends Controller
         $testIds = array_values(array_filter(array_map('intval', (array) ($package->test_ids ?? []))));
 
         return [
-            'id' => $package->id,
-            'title' => $package->title,
-            'badge' => $package->badge,
-            'description' => $package->description,
-            'price' => number_format((float) $package->price, 2, '.', ''),
-            'image' => !empty($package->image) ? GlobalFunction::createMediaUrl($package->image) : null,
-            'status' => (int) $package->status,
+                'id' => $package->id,
+                'title' => $package->title,
+                'badge' => $package->badge,
+                'description' => $package->description,
+                'price' => number_format((float) $package->price, 2, '.', ''),
+                'image' => !empty($package->image) ? GlobalFunction::createMediaUrl($package->image) : null,
+                'status' => (int) $package->status,
             'test_ids' => $testIds,
             'includes_all_tests' => empty($testIds),
             'tests' => $package->includedTests()->map(fn($test) => [
@@ -106,8 +106,8 @@ class MajorOrganTestController extends Controller
         $totalData = $query->count();
 
         $columns = [
-            0 => 'display_order',
-            1 => 'name',
+            0 => 'name',
+            1 => 'price',
             3 => 'status',
             4 => 'display_order',
         ];
@@ -123,7 +123,8 @@ class MajorOrganTestController extends Controller
 
         if (!empty($search)) {
             $filteredQuery->where(function ($q) use ($search) {
-                $q->where('name', 'LIKE', "%{$search}%");
+                $q->where('name', 'LIKE', "%{$search}%")
+                    ->orWhere('price', 'LIKE', "%{$search}%");
             });
         }
 
@@ -139,12 +140,6 @@ class MajorOrganTestController extends Controller
         foreach ($result as $item) {
             $biomarkers = is_array($item->biomarkers) ? $item->biomarkers : [];
             $count = count($biomarkers);
-
-            $icon = '<img src="http://placehold.jp/50x50.png" width="50" height="50">';
-            if (!empty($item->icon)) {
-                $iconUrl = GlobalFunction::createMediaUrl($item->icon);
-                $icon = '<img src="' . $iconUrl . '" width="50" height="50" style="object-fit:cover;border-radius:6px;">';
-            }
 
             $biomarkerItems = '';
             foreach ($biomarkers as $biomarker) {
@@ -165,7 +160,7 @@ class MajorOrganTestController extends Controller
 
             $edit = '<a href="#" class="mr-2 btn btn-primary text-white edit"'
                 . ' data-name="' . e($item->name) . '"'
-                . ' data-icon="' . e(!empty($item->icon) ? GlobalFunction::createMediaUrl($item->icon) : '') . '"'
+                . ' data-price="' . e($item->price) . '"'
                 . ' data-status="' . (int) $item->status . '"'
                 . ' data-display_order="' . (int) $item->display_order . '"'
                 . ' data-biomarkers="' . e(json_encode($biomarkers)) . '"'
@@ -174,8 +169,8 @@ class MajorOrganTestController extends Controller
             $delete = '<a href="" class="mr-2 btn btn-danger text-white delete" rel="' . $item->id . '">' . __('Delete') . '</a>';
 
             $data[] = [
-                $icon,
                 e($item->name),
+                number_format((float) $item->price, 2),
                 $biomarkersCol,
                 $status,
                 (int) $item->display_order,
@@ -202,6 +197,7 @@ class MajorOrganTestController extends Controller
 
         $item = new MajorOrganTest();
         $item->name = $request->name;
+        $item->price = $request->price;
         $item->biomarkers = $biomarkers;
         $item->status = (int) $request->status;
         $item->display_order = (int) ($request->display_order ?? 0);
@@ -230,6 +226,7 @@ class MajorOrganTestController extends Controller
         }
 
         $item->name = $request->name;
+        $item->price = $request->price;
         $item->biomarkers = $biomarkers;
         $item->status = (int) $request->status;
         $item->display_order = (int) ($request->display_order ?? 0);
@@ -269,6 +266,7 @@ class MajorOrganTestController extends Controller
                     'id' => $item->id,
                     'name' => $item->name,
                     'icon' => !empty($item->icon) ? GlobalFunction::createMediaUrl($item->icon) : null,
+                    'price' => number_format((float) $item->price, 2, '.', ''),
                     'biomarker_count' => count($biomarkers),
                     'biomarkers' => $biomarkers,
                 ];

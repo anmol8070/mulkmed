@@ -32,6 +32,7 @@ use App\Http\Controllers\SenoclockTestController;
 use App\Http\Controllers\AdminManagementController;
 use App\Http\Controllers\MajorOrganTestController;
 use App\Http\Controllers\LongevityPlanController;
+use App\Http\Controllers\HomeSampleCollectionController;
 
 /*
 |--------------------------------------------------------------------------
@@ -628,6 +629,17 @@ Route::prefix('longevityPlans')->name('longevityPlans.')->group(function () {
     Route::post('add', [LongevityPlanController::class, 'add'])->middleware(['checkLogin'])->name('add');
     Route::post('edit', [LongevityPlanController::class, 'edit'])->middleware(['checkLogin'])->name('edit');
     Route::get('delete/{id}', [LongevityPlanController::class, 'delete'])->middleware(['checkLogin'])->name('delete');
+});
+
+// Home Sample Collections (Mulk Longevity)
+Route::prefix('homeSampleCollections')->name('homeSampleCollections.')->group(function () {
+    Route::get('/', [HomeSampleCollectionController::class, 'index'])->middleware(['checkLogin'])->name('index');
+    Route::post('fetch', [HomeSampleCollectionController::class, 'fetch'])->middleware(['checkLogin'])->name('fetch');
+    Route::post('status', [HomeSampleCollectionController::class, 'updateStatus'])->middleware(['checkLogin'])->name('status');
+    Route::get('labs', [HomeSampleCollectionController::class, 'labsIndex'])->middleware(['checkLogin'])->name('labs.index');
+    Route::get('labs/list', [HomeSampleCollectionController::class, 'listLabs'])->middleware(['checkLogin'])->name('labs.list');
+    Route::post('labs/save', [HomeSampleCollectionController::class, 'saveLab'])->middleware(['checkLogin'])->name('labs.save');
+    Route::get('labs/delete/{id}', [HomeSampleCollectionController::class, 'deleteLab'])->middleware(['checkLogin'])->name('labs.delete');
 });
 
 // 

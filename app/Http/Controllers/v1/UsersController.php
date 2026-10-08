@@ -3422,7 +3422,8 @@ Team Mulk Med.";
         // banner's spot (from the second position), keeping their own section_type so the app
         // renders them as banner cards.
         $longevityCards = [];
-        foreach (['mulk_longevity_care', 'mulk_longevity_lab_report'] as $longevityType) {
+        // Lab Report card first (only present for users who bought a plan), then Longevity Care.
+        foreach (['mulk_longevity_lab_report', 'mulk_longevity_care'] as $longevityType) {
             foreach ($sectionSequence as $index => $sec) {
                 if (strtolower((string) $sec->section_type) === $longevityType) {
                     $longevityCards[] = $sec;

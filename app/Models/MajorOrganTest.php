@@ -14,6 +14,7 @@ class MajorOrganTest extends Model
     protected $fillable = [
         'name',
         'icon',
+        'price',
         'biomarkers',
         'status',
         'display_order',
@@ -23,11 +24,6 @@ class MajorOrganTest extends Model
         'biomarkers' => 'array',
         'status' => 'integer',
         'display_order' => 'integer',
+        'price' => 'decimal:2',
     ];
-
-    // The price column was removed; API responses that still read $test->price get 0.
-    public function getPriceAttribute($value): float
-    {
-        return (float) ($value ?? 0);
-    }
 }

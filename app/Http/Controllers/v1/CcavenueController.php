@@ -1162,30 +1162,8 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                             'user_id' => $ai_vital_misa->user_id,
                         ]);
 
-                        // 1. Update MajorOrganUserSelection
-                        $selection = \App\Models\MajorOrganUserSelection::where('order_id', $responseData['order_id'])->first();
-                        if (!$selection && isset($ai_vital_misa->user_id)) {
-                            $selection = \App\Models\MajorOrganUserSelection::where('user_id', $ai_vital_misa->user_id)
-                                ->where('payment_status', 0)
-                                ->latest()
-                                ->first();
-                        }
-                        if (!$selection && !empty($responseData['merchant_param4']) && is_numeric($responseData['merchant_param4'])) {
-                            $selection = \App\Models\MajorOrganUserSelection::find($responseData['merchant_param4']);
-                        }
-                        if ($selection) {
-                            $selection->payment_status = 1;
-                            $selection->status = 1;
-                            $selection->order_id = $responseData['order_id'];
-                            $selection->save();
-
-                            Log::info('successAIVitalScan: updated MajorOrganUserSelection in DB', [
-                                'order_id' => $responseData['order_id'],
-                                'selection_id' => $selection->id,
-                                'payment_status' => 1,
-                                'status' => 1,
-                            ]);
-                        }
+                        // 1. Add the MajorOrganUserSelection for this order now that it is paid.
+                        $selection = $this->paidSelectionForOrder($responseData['order_id']);
 
                         // 2. Create UserLongevityPlan entry as ONE SINGLE ROW
                         $this->storePaidUserLongevityPlan($responseData, $ai_vital_misa->user_id, $selection);
@@ -1404,6 +1382,21 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
             if ($planInput !== null) {
                 $planIds = is_array($planInput) ? $planInput : explode(',', (string) $planInput);
                 $planIds = array_values(array_filter(array_unique(array_map('intval', $planIds))));
+            }
+
+            // The app sometimes pays for a package without sending package_id. When no plan,
+            // package or test ids were sent, use the active package whose price equals the amount.
+            if (empty($longevityPlanIds) && empty($packageIds) && empty($planIds)) {
+                $matchingPackages = \App\Models\MajorOrganPackage::where('status', 1)->get()
+                    ->filter(fn($pkg) => abs((float) CurrencyHelper::convert((float) $pkg->price, $currency) - (float) $amount) < 0.01);
+                if ($matchingPackages->count() === 1) {
+                    $packageIds = [(int) $matchingPackages->first()->id];
+                    Log::info('initiatePaymentLongevity: package_id not sent, matched package by amount', [
+                        'order_id' => $order_id,
+                        'amount' => $amount,
+                        'package_id' => $packageIds[0],
+                    ]);
+                }
             }
 
             // Persist full checkout payload fields when columns exist
@@ -1629,11 +1622,12 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                         $selection->organ_health_check_count = count($combinedOrganTests);
                         $selection->total_biomarkers = count($combinedBiomarkers);
                     }
-                    $selection->save();
+                    // Not saved yet: the row is added to major_organ_user_selections only when the
+                    // payment succeeds (paidSelectionForOrder), so unpaid checkouts leave no entry.
+                    Cache::put('longevity_checkout_selection_' . $order_id, $selection->getAttributes(), now()->addDays(7));
 
-                    Log::info('Saved MajorOrganUserSelection for major organ payment', [
+                    Log::info('Prepared MajorOrganUserSelection for major organ payment (saved on payment success)', [
                         'order_id' => $order_id,
-                        'selection_id' => $selection->id,
                         'user_id' => $request->user_id,
                         'plan_ids' => $planIds,
                         'package_ids' => $packageIds,
@@ -2329,21 +2323,8 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
                             'user_id' => $ai_vital_misa->user_id,
                         ]);
 
-                        // 1. Update MajorOrganUserSelection status & payment_status if exists
-                        $selection = \App\Models\MajorOrganUserSelection::where('order_id', $responseData['order_id'])->first();
-                        if ($selection) {
-                            $selection->payment_status = 1;
-                            $selection->status = 1; // 1 = active / purchased selection
-                            $selection->save();
-
-                            Log::info('Longevity payment success: updated MajorOrganUserSelection in DB', [
-                                'order_id' => $responseData['order_id'],
-                                'selection_id' => $selection->id,
-                                'user_id' => $selection->user_id,
-                                'payment_status' => 1,
-                                'status' => 1,
-                            ]);
-                        }
+                        // 1. Add the MajorOrganUserSelection for this order now that it is paid.
+                        $selection = $this->paidSelectionForOrder($responseData['order_id']);
 
                         // 2. Process Longevity Plan / Major Organ DB entries as ONE SINGLE ROW for UserLongevityPlan & AI_Vital
                         $combinedPlanIdsStr = $this->storePaidUserLongevityPlan($responseData, $ai_vital_misa->user_id, $selection);
@@ -2844,6 +2825,40 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
         }
 
         return response('OK', 200);
+    }
+
+    /**
+     * The major_organ_user_selections row for a successfully paid order: created now from the
+     * checkout details (kept in cache by initiatePaymentLongevity), or an existing row for the
+     * order made before this change. Returns null when the order had no package/tests.
+     */
+    private function paidSelectionForOrder(string $orderId): ?\App\Models\MajorOrganUserSelection
+    {
+        $selection = \App\Models\MajorOrganUserSelection::where('order_id', $orderId)->first();
+
+        if (!$selection) {
+            $attributes = Cache::get('longevity_checkout_selection_' . $orderId);
+            if (empty($attributes)) {
+                return null;
+            }
+            $selection = new \App\Models\MajorOrganUserSelection();
+            $selection->setRawAttributes($attributes);
+        }
+
+        $selection->order_id = $orderId;
+        $selection->payment_status = 1;
+        $selection->status = 1; // 1 = active / purchased selection
+        $selection->save();
+        Cache::forget('longevity_checkout_selection_' . $orderId);
+
+        Log::info('Longevity payment success: saved MajorOrganUserSelection', [
+            'order_id' => $orderId,
+            'selection_id' => $selection->id,
+            'user_id' => $selection->user_id,
+            'package_id' => $selection->package_id,
+        ]);
+
+        return $selection;
     }
 
     /**

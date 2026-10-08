@@ -117,8 +117,8 @@
                         <table class="table table-striped w-100" id="organTestsTable">
                             <thead>
                                 <tr>
-                                    <th>{{ __('Icon') }}</th>
                                     <th>{{ __('Organ Test Name') }}</th>
+                                    <th>{{ __('Total Price') }}</th>
                                     <th>{{ __('Biomarkers') }}</th>
                                     <th>{{ __('Status') }}</th>
                                     <th>{{ __('Display Order') }}</th>
@@ -258,13 +258,8 @@
                         </div>
 
                         <div class="form-group">
-                            <label>{{ __('Icon') }}</label>
-                            <input id="editIcon" type="file" name="icon" accept="image/*" class="form-control">
-                            <div class="mt-3">
-                                <label>{{ __('Image Preview') }}</label>
-                                <img id="editPreviewIcon" src="http://placehold.jp/120x120.png" alt="Preview"
-                                    style="width:120px;height:120px;display:block;border:1px solid #ccc;border-radius:6px;object-fit:cover;">
-                            </div>
+                            <label>{{ __('Total Price') }}</label>
+                            <input type="number" step="0.01" min="0" id="editPrice" name="price" class="form-control" required>
                         </div>
 
                         <div class="form-group">
@@ -319,13 +314,8 @@
                         </div>
 
                         <div class="form-group">
-                            <label>{{ __('Icon') }}</label>
-                            <input id="addIcon" type="file" name="icon" accept="image/*" class="form-control">
-                            <div class="mt-3">
-                                <label>{{ __('Image Preview') }}</label>
-                                <img id="addPreviewIcon" src="http://placehold.jp/120x120.png" alt="Preview"
-                                    style="width:120px;height:120px;display:block;border:1px solid #ccc;border-radius:6px;object-fit:cover;">
-                            </div>
+                            <label>{{ __('Total Price') }}</label>
+                            <input type="number" step="0.01" min="0" name="price" class="form-control" required>
                         </div>
 
                         <div class="form-group">

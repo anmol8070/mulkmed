@@ -165,6 +165,8 @@ class Helpers
                 'children' => [
                     'mulk_longevity.major_organ_tests' => 'Major Organ Tests',
                     'mulk_longevity.longevity_plans' => 'Longevity Plans',
+                    'mulk_longevity.home_sample_collections' => 'Home Sample Collections',
+                    'mulk_longevity.home_sample_labs' => 'Sample Collection Labs',
                 ],
             ],
             'other_data' => [

@@ -54,6 +54,12 @@ class MajorOrganTestController extends Controller
         // Increase maximum execution time to 300 seconds (5 minutes) for large images
         set_time_limit(300);
 
+        // The app sends package_id "null" (or empty) when no package is selected:
+        // then the user's bought package is used.
+        if (in_array(strtolower(trim((string) $request->input('package_id'))), ['', 'null', 'undefined', '0'], true)) {
+            $request->merge(['package_id' => null]);
+        }
+
         $validator = Validator::make($request->all(), [
             'user_id' => 'required|integer|exists:users,id',
             'height' => 'required|string',
@@ -320,6 +326,7 @@ class MajorOrganTestController extends Controller
                     'id' => $test?->id,
                     'code' => $code,
                     'name' => \App\Services\SenoclockAiService::biomarkerName($code),
+                    'price' => number_format((float) ($test?->price ?? 0), 2, '.', ''),
                     'biomarkers' => $test && is_array($test->biomarkers) ? $test->biomarkers : [$code],
                     'is_required' => true,
                 ];
@@ -340,8 +347,6 @@ class MajorOrganTestController extends Controller
                 if (isset($usedTestIds[$item['id'] ?? null]) || !$isInPlan($item['id'] ?? null)) {
                     continue;
                 }
-                // Organ tests no longer have a price, so it is not shown.
-                unset($item['price']);
                 $missingOtherItems[] = array_merge($item, ['is_required' => false]);
             }
             $missingAll = array_merge($missingRequiredItems, $missingOtherItems);
@@ -355,10 +360,46 @@ class MajorOrganTestController extends Controller
             $analysis['overall_match_percentage'] = $analysis['total_count'] > 0
                 ? round($analysis['available_count'] / $analysis['total_count'] * 100, 2)
                 : 0;
-            $analysis['to_pay'] = CurrencyHelper::convert(
+            // to_pay = missing biomarkers total + the package amount (amounts in AED):
+            // - package already bought (paid): fixed charge Comprehensive 300 / Basic 100 when
+            //   biomarkers are missing, nothing when none are missing;
+            // - package selected but not bought yet: the package's original price;
+            // - no package: 0.
+            $missingBiomarkersAmount = CurrencyHelper::convert(
                 (float) array_sum(array_map(fn($item) => (float) ($item['price'] ?? 0), $missingAll)),
                 $currency
             );
+            $planChargeAed = 0;
+            $packageAlreadyBought = false;
+            if (!empty($requirement['package_id'])) {
+                $packageAlreadyBought = MajorOrganUserSelection::where('user_id', (int) $request->user_id)
+                    ->whereIn('selection_type', ['package', 'longevity'])
+                    ->where('package_id', $requirement['package_id'])
+                    ->where('payment_status', 1)
+                    ->exists();
+                if (!$packageAlreadyBought) {
+                    $planChargeAed = (float) (MajorOrganPackage::find($requirement['package_id'])->price ?? 0);
+                } elseif (!empty($missingAll)) {
+                    $planChargeAed = ['comprehensive' => 300, 'basic' => 100][$requirement['plan']] ?? 0;
+                }
+                // Already bought and nothing missing: nothing to pay.
+            }
+            $planAmount = CurrencyHelper::convert((float) $planChargeAed, $currency);
+            // Shown right after total_count, below missing_biomarkers.
+            unset($analysis['to_pay'], $analysis['currency']);
+            $amounts = [
+                'missing_biomarkers_amount' => $missingBiomarkersAmount,
+                'package_id' => $requirement['package_id'],
+                'package_already_bought' => $packageAlreadyBought,
+                'package_amount' => $planAmount,
+                'to_pay' => round($missingBiomarkersAmount + $planAmount, 2),
+                'currency' => $currency,
+            ];
+            $afterTotal = array_search('total_count', array_keys($analysis), true);
+            $analysis = $afterTotal === false
+                ? $analysis + $amounts
+                : array_slice($analysis, 0, $afterTotal + 1, true) + $amounts + array_slice($analysis, $afterTotal + 1, null, true);
+            $labReport->to_pay = $analysis['to_pay'];
 
             $labReport->available_biomarkers = $analysis['available_biomarkers'];
             $labReport->missing_biomarkers = $missingAll;
@@ -855,37 +896,34 @@ class MajorOrganTestController extends Controller
         }
 
             $tests = $package->includedTests();
-            
             $payload = $this->buildSelectionPayload($request->user_id, 'package', $package, $tests, $request->plan_id);
-            
-            \App\Models\MajorOrganUserSelection::updateOrCreate(
-                ['user_id' => (int) $request->user_id, 'status' => 1, 'selection_type' => 'package'],
-                $payload
-            );
         } else {
             $tests = MajorOrganTest::where('status', 1)->whereIn('id', $organTestIds)->get();
-            if ($tests->isNotEmpty()) {
-                $payload = $this->buildSelectionPayload($request->user_id, 'individual', null, $tests, $request->plan_id);
-                \App\Models\MajorOrganUserSelection::updateOrCreate(
-                    ['user_id' => (int) $request->user_id, 'status' => 1, 'selection_type' => 'individual'],
-                    $payload
-                );
-            }
+            $payload = $tests->isNotEmpty()
+                ? $this->buildSelectionPayload($request->user_id, 'individual', null, $tests, $request->plan_id)
+                : null;
         }
 
-        // Fetch all active selections for this user to return as an array
-        $allSelections = \App\Models\MajorOrganUserSelection::where('user_id', (int) $request->user_id)
-            ->where('status', 1)
+        // The selection is not stored here: major_organ_user_selections only gets a row once the
+        // payment for it succeeds (see CcavenueController). Return it with the user's paid ones.
+        $data = [];
+        if ($payload) {
+            $current = new MajorOrganUserSelection($payload);
+            $current->id = 0;
+            $data[] = $this->formatSelection($current);
+        }
+
+        $paidSelections = MajorOrganUserSelection::where('user_id', (int) $request->user_id)
+            ->where('payment_status', 1)
             ->orderBy('id', 'desc')
             ->get();
-
-        $result = $this->formatGroupedSelections($allSelections, CurrencyHelper::getUserCurrency());
+        $data = array_merge($data, $this->formatGroupedSelections($paidSelections, CurrencyHelper::getUserCurrency())['data']);
 
         return response()->json([
             'status' => true,
             'message' => 'Selection saved successfully',
             'currency' => CurrencyHelper::getUserCurrency(),
-            'data' => $result['data'],
+            'data' => $data,
         ]);
     }
 
