@@ -1,6 +1,6 @@
 @extends('include.app')
 @section('header')
-    <script src="{{ asset('asset/script/majorOrganTests.js') }}?v=1.5"></script>
+    <script src="{{ asset('asset/script/majorOrganTests.js') }}?v=1.6"></script>
 @endsection
 
 @section('content')

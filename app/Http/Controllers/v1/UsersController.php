@@ -3451,6 +3451,20 @@ Team Mulk Med.";
         if (!empty($longevityCards)) {
             array_splice($sectionSequence, min(1, count($sectionSequence)), 0, $longevityCards);
         }
+
+        // Mulk Med Virtual Hospital Doctors sits below the dashboard cards.
+        $virtualHospitalDoctors = [];
+        foreach ($sectionSequence as $index => $sec) {
+            if (strtolower((string) $sec->section_type) === 'mulk_med_virtual_hospital_doctors') {
+                $virtualHospitalDoctors[] = $sec;
+                array_splice($sectionSequence, $index, 1);
+                break;
+            }
+        }
+        if (!empty($virtualHospitalDoctors)) {
+            array_push($sectionSequence, ...$virtualHospitalDoctors);
+        }
+
         foreach ($sectionSequence as $index => $sec) {
             $sec->id = $index + 1;
         }

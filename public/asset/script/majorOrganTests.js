@@ -114,7 +114,7 @@ $(document).ready(function () {
                             <span>${$("<div>").text(test.name).html()}</span>
                         </div>
                         <div class="organ-test-preview-meta">
-                            <div class="organ-test-preview-price">$${test.price}</div>
+                            <div class="organ-test-preview-price">AED ${test.price}</div>
                             <div class="organ-test-preview-count">${test.biomarker_count} Biomarkers</div>
                         </div>
                     </div>
