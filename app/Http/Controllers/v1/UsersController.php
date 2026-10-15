@@ -45,6 +45,7 @@ use App\Models\AI_Vital;
 use App\Models\AIVitalScanMisa;
 use App\Models\UserLongevityPlan;
 use App\Models\MajorOrganUserSelection;
+use App\Models\LabReport;
 use App\Models\UserCoupons;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Http;
@@ -2476,14 +2477,25 @@ Team Mulk Med.";
         $sectionSequence = [];
 
         $hasBoughtLongevityPlan = false;
+        $hasUploadedLabReport = false;
         $userId = $request->user_id ?? $request->query('user_id');
         if (!empty($userId)) {
             // A plan is bought when major_organ_user_selections has a paid plan purchase
-            // (unpaid checkouts have payment_status 0).
-            $hasBoughtLongevityPlan = MajorOrganUserSelection::where('user_id', $userId)
+            // (unpaid checkouts have payment_status 0). Both lab report banners show after
+            // that purchase. Once a report uploaded on or after it is generated, only banner 147 stays.
+            $paidPlan = MajorOrganUserSelection::where('user_id', $userId)
                 ->whereIn('selection_type', ['longevity', 'package'])
                 ->where('payment_status', 1)
-                ->exists();
+                ->latest('id')
+                ->first();
+            $hasBoughtLongevityPlan = (bool) $paidPlan;
+            if ($paidPlan) {
+                $hasUploadedLabReport = LabReport::where('user_id', $userId)
+                    ->where('created_at', '>=', $paidPlan->created_at)
+                    ->where('senoclock_status', 'completed')
+                    ->whereNotNull('senoclock_pdf_path')
+                    ->exists();
+            }
         }
 
         $hostAndConversionRate = Helpers::conversionRate();
@@ -2796,9 +2808,10 @@ Team Mulk Med.";
             ]);
         }
 
-        // Temporarily hide every dashboard card except AI scan, longevity, common health problems
-        // and Mulk Med virtual hospital doctors. Remove this filter to show all cards again.
-        $visibleSectionTypes = ['mulk_ai_vitals', 'mulk_longevity_lab_report', 'mulk_longevity_care', 'common_health_problems', 'mulk_med_virtual_hospital_doctors'];
+        // Temporarily hide every dashboard card except longevity, common health problems
+        // and Mulk Med virtual hospital doctors. Mulk AI Wellness Health Check is hidden for now.
+        // Remove this filter to show all cards again.
+        $visibleSectionTypes = [/* 'mulk_ai_vitals', */ 'mulk_longevity_lab_report', 'mulk_longevity_care', 'common_health_problems', 'mulk_med_virtual_hospital_doctors'];
         $sections = $sections->filter(
             fn($section) => in_array(strtolower((string) $section->section_type), $visibleSectionTypes, true)
         )->values();
@@ -2934,12 +2947,13 @@ Team Mulk Med.";
                 }
             }
 
-            // Mulk Longevity Lab Report card: only for users who bought a longevity plan.
+            // Mulk Longevity Lab Report: both banners after purchase; only id 147 after the report is generated.
             if($sequence->section_type == 'mulk_longevity_lab_report')
             {
                 if ($hasBoughtLongevityPlan) {
                     $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
                                     ->where('is_deleted', 0)
+                                    ->when($hasUploadedLabReport, fn ($query) => $query->where('id', 147))
                                     ->get();
                     if($labReportSection->isNotEmpty())
                     {
@@ -2965,11 +2979,12 @@ Team Mulk Med.";
                     array_push($sectionSequence,$sequence);
                 }
 
-                // Separate section for Mulk Longevity Lab Report (only for users who bought a plan)
+                // Separate section for Mulk Longevity Lab Report (both banners after purchase; only id 147 after the report is generated)
                 if ($hasBoughtLongevityPlan && !$sections->contains('section_type', 'mulk_longevity_lab_report'))
                 {
                 $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
                                 ->where('is_deleted', 0)
+                                ->when($hasUploadedLabReport, fn ($query) => $query->where('id', 147))
                                 ->get();
                 if($labReportSection->isNotEmpty())
                 {
@@ -3165,17 +3180,18 @@ Team Mulk Med.";
                 }
             }
 
-            if($sequence->section_type == 'mulk_ai_vitals')
-            {
-                $section = DashboardBanners::where('name', 'MULK AI Vitals')
-                                ->where('is_deleted', 0)
-                                ->get();
-                if($section != [])
-                {
-                    $sequence->section_data = $section;
-                    array_push($sectionSequence,$sequence);
-                }
-            }
+            // Hidden for now: Mulk AI Wellness Health Check (mulk_ai_vitals).
+            // if($sequence->section_type == 'mulk_ai_vitals')
+            // {
+            //     $section = DashboardBanners::where('name', 'MULK AI Vitals')
+            //                     ->where('is_deleted', 0)
+            //                     ->get();
+            //     if($section != [])
+            //     {
+            //         $sequence->section_data = $section;
+            //         array_push($sectionSequence,$sequence);
+            //     }
+            // }
 
             if($sequence->section_type == 'mulk_hnh')
             {

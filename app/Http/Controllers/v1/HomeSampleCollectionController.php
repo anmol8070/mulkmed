@@ -6,8 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Models\HomeSampleCollection;
 use App\Models\HomeSampleLab;
 use App\Models\MajorOrganUserSelection;
+use App\Models\Users;
+use App\Mail\HomeSampleCollectionLabMail;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 
 /**
@@ -84,7 +88,8 @@ class HomeSampleCollectionController extends Controller
             'user_id' => 'required|integer|exists:users,id',
             'order_id' => 'nullable|string',
             'lab_id' => 'nullable|integer|exists:home_sample_labs,id',
-            'emirate' => 'required|string|in:' . implode(',', self::EMIRATES),
+            'emirate' => 'required|string|max:191',
+            // 'emirate' => 'required|string|in:' . implode(',', self::EMIRATES),
             'area' => 'required|string|max:191',
             'building' => 'required|string|max:191',
             'flat_no' => 'nullable|string|max:50',
@@ -131,9 +136,12 @@ class HomeSampleCollectionController extends Controller
             ]
         );
 
+        $labEmailSent = $this->notifyLab($booking);
+
         return response()->json([
             'status' => true,
             'message' => 'Home sample collection confirmed successfully',
+            'lab_email_sent' => $labEmailSent,
             'data' => $this->format($booking),
         ]);
     }
@@ -164,14 +172,38 @@ class HomeSampleCollectionController extends Controller
 
     /**
      * Active labs (added by admin) the user can pick for home sample collection.
+     * For now only lab id 1 is returned.
      */
     public function labs()
     {
         return response()->json([
             'status' => true,
             'message' => 'Labs fetched successfully',
-            'data' => $this->activeLabs(),
+            'data' => HomeSampleLab::where('status', 1)
+                ->where('id', 1)
+                ->get(['id', 'name', 'email'])
+                ->toArray(),
         ]);
+    }
+
+    /**
+     * Emails the booking details to the lab the user picked. A mail failure never fails the booking.
+     */
+    private function notifyLab(HomeSampleCollection $booking): bool
+    {
+        $lab = $booking->lab;
+        if (!$lab || empty($lab->email)) {
+            return false;
+        }
+
+        try {
+            Mail::to($lab->email)->send(new HomeSampleCollectionLabMail($booking, Users::find($booking->user_id), $lab->name));
+            Log::info('Home sample collection: lab email sent', ['booking_id' => $booking->id, 'lab_id' => $lab->id, 'email' => $lab->email]);
+            return true;
+        } catch (\Throwable $e) {
+            Log::error('Home sample collection: lab email failed', ['booking_id' => $booking->id, 'lab_id' => $lab->id, 'error' => $e->getMessage()]);
+            return false;
+        }
     }
 
     private function activeLabs(): array

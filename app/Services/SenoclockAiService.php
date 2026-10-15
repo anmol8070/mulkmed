@@ -1937,7 +1937,11 @@ class SenoclockAiService
                     continue;
                 }
 
-                $sKey = $this->findSenoclockKey($matchName, $mapping);
+                // The analyzer resolves report codes ("GLC Glucose", "ATLYMPHAtypical lymphocytes")
+                // into 'code'; trust it over re-matching the display name.
+                $sKey = empty($biomarker['matched_biomarkers']) && !empty($biomarker['code'])
+                    ? (string) $biomarker['code']
+                    : $this->findSenoclockKey($matchName, $mapping);
                 if (!$sKey) {
                     continue;
                 }

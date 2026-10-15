@@ -334,27 +334,49 @@ class MajorOrganTestController extends Controller
 
             // Only the plan's biomarkers count: Basic/no plan = the 20, Comprehensive = all 54.
             // Organ tests for biomarkers outside the plan are left out of missing/available.
-            $planCodes = array_flip($requirement['codes']);
             $testCodeById = [];
             foreach ($organTestByCode as $code => $test) {
                 $testCodeById[$test->id] = $code;
             }
-            $isInPlan = fn($testId) => !isset($testCodeById[$testId]) || isset($planCodes[$testCodeById[$testId]]);
 
-            // Organ tests already listed as required are not repeated.
+            // A test linked to a plan biomarker is decided by the extracted markers alone (the
+            // same source as missingRequired), never by fuzzy panel-name matching: otherwise a
+            // test could be both "present" as a marker and listed (and charged) as missing, or
+            // drop out of both lists, making available_count disagree with marker_count.
+            // Only tests not linked to any SenoClock code keep the analyzer's name matching.
+            $isLinked = fn($testId) => isset($testCodeById[$testId]);
+
             $missingOtherItems = [];
             foreach ($analysis['missing_biomarkers'] ?? [] as $item) {
-                if (isset($usedTestIds[$item['id'] ?? null]) || !$isInPlan($item['id'] ?? null)) {
+                if (isset($usedTestIds[$item['id'] ?? null]) || $isLinked($item['id'] ?? null)) {
                     continue;
                 }
                 $missingOtherItems[] = array_merge($item, ['is_required' => false]);
             }
             $missingAll = array_merge($missingRequiredItems, $missingOtherItems);
 
-            $analysis['available_biomarkers'] = array_values(array_filter(
-                $analysis['available_biomarkers'] ?? [],
-                fn($item) => $isInPlan($item['id'] ?? null)
-            ));
+            $missingRequiredSet = array_flip($missingRequired);
+            $availableItems = [];
+            foreach ($requirement['codes'] as $code) {
+                if (isset($missingRequiredSet[$code])) {
+                    continue;
+                }
+                $test = $organTestByCode[$code] ?? null;
+                // id null when no active organ test row exists for this plan biomarker.
+                $availableItems[] = [
+                    'id' => $test?->id,
+                    'code' => $code,
+                    'name' => $test?->name ?? \App\Services\SenoclockAiService::biomarkerName($code),
+                    'matched_biomarkers' => $test && is_array($test->biomarkers) ? $test->biomarkers : [$code],
+                ];
+            }
+            foreach ($analysis['available_biomarkers'] ?? [] as $item) {
+                if (!$isLinked($item['id'] ?? null)) {
+                    unset($item['confidence']);
+                    $availableItems[] = $item;
+                }
+            }
+            $analysis['available_biomarkers'] = $availableItems;
             $analysis['available_count'] = count($analysis['available_biomarkers']);
             $analysis['total_count'] = $analysis['available_count'] + count($missingAll);
             $analysis['overall_match_percentage'] = $analysis['total_count'] > 0
@@ -420,6 +442,8 @@ class MajorOrganTestController extends Controller
             if (!empty($missingRequired)) {
                 $labReport->senoclock_status = 'failed';
                 $labReport->save();
+                // Missing-biomarker flow: the app pays for the gaps first, so the report id stays off the response.
+                unset($analysis['lab_report_id']);
                 $analysis['senoclock'] = [
                     'job_dispatched' => false,
                     'status' => 'failed',
@@ -470,8 +494,46 @@ class MajorOrganTestController extends Controller
                 ]);
             }
 
-            // Not shown in the app response (still kept in lab_reports.analysis_response).
-            unset($analysis['missing_fields'], $analysis['mismatches']);
+            // Not shown in the app response (still kept in lab_reports.analysis_response,
+            // where ProcessSenoclockIntegration reads extracted_biomarkers): internal scoring,
+            // raw OCR text, echoed request inputs and the SenoClock request/response payloads.
+            unset(
+                $analysis['missing_fields'],
+                $analysis['mismatches'],
+                $analysis['overall_match_percentage'],
+                $analysis['confidence_score'],
+                $analysis['matching_fields'],
+                $analysis['extra_fields'],
+                $analysis['modified_fields'],
+                $analysis['section_confidence'],
+                $analysis['extracted_biomarkers'],
+                $analysis['ocr_text'],
+                $analysis['ocr_text_preview'],
+                $analysis['extraction_source'],
+                $analysis['document_paths'],
+                $analysis['height'],
+                $analysis['weight'],
+                $analysis['blood_pressure'],
+                $analysis['allergies'],
+                $analysis['user_id'],
+                $analysis['status']
+            );
+            foreach (['available_biomarkers', 'missing_biomarkers'] as $listKey) {
+                if (isset($analysis[$listKey])) {
+                    $analysis[$listKey] = array_map(function ($item) {
+                        unset($item['confidence']);
+                        return $item;
+                    }, $analysis[$listKey]);
+                }
+            }
+            if (isset($analysis['senoclock'])) {
+                unset(
+                    $analysis['senoclock']['execute_payload'],
+                    $analysis['senoclock']['execute_response'],
+                    $analysis['senoclock']['download_response'],
+                    $analysis['senoclock']['mapped_markers']
+                );
+            }
 
             return response()->json([
                 'status' => true,

@@ -449,16 +449,32 @@ Rules:
                 ],
             ];
 
-            $response = $analyzerService->openAiHttpClient($apiKey)
-                ->timeout(240)
-                ->post('https://api.openai.com/v1/responses', $payload);
+            $response = $analyzerService->trackOpenAiCall(
+                'ai_vital_pdf_analysis',
+                'POST',
+                'https://api.openai.com/v1/responses',
+                true,
+                fn () => $analyzerService->openAiHttpClient($apiKey)
+                    ->timeout(240)
+                    ->post('https://api.openai.com/v1/responses', $payload),
+                $payload['model'],
+                $uploadedPdf['original_name'] ?? null
+            );
 
             if ($response->status() === 429) {
                 // Retry once after 2 seconds delay in case of momentary rate limit
                 sleep(2);
-                $response = $analyzerService->openAiHttpClient($apiKey)
-                    ->timeout(240)
-                    ->post('https://api.openai.com/v1/responses', $payload);
+                $response = $analyzerService->trackOpenAiCall(
+                    'ai_vital_pdf_analysis_retry',
+                    'POST',
+                    'https://api.openai.com/v1/responses',
+                    true,
+                    fn () => $analyzerService->openAiHttpClient($apiKey)
+                        ->timeout(240)
+                        ->post('https://api.openai.com/v1/responses', $payload),
+                    $payload['model'],
+                    $uploadedPdf['original_name'] ?? null
+                );
             }
 
             $responseData = $response->json();

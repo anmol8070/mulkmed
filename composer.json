@@ -26,6 +26,7 @@
         "ramsey/uuid": "^4.7",
         "rap2hpoutre/fast-excel": "^3.0",
         "setasign/fpdi": "^2.1",
+        "smalot/pdfparser": "^2.12",
         "stichoza/google-translate-php": "^4.1",
         "symfony/css-selector": "^6.4"
     },

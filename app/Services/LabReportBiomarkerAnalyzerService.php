@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\MajorOrganTest;
+use App\Models\OpenAiApiLog;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
@@ -188,15 +189,24 @@ PROMPT;
             ]);
         }
 
-        // Deterministic deduplication in PHP
+        // Deterministic deduplication in PHP, keyed on the SenoClock code when known so a
+        // summary-box "HGB" and the table row "Hemoglobin" count as one biomarker.
+        // Entries without a value are dropped: a name alone is not an extracted result.
         $uniqueBiomarkers = [];
         foreach ($allExtractedBiomarkers as $marker) {
-            if (!isset($marker['name'])) {
+            if (!is_array($marker) || trim((string) ($marker['name'] ?? '')) === '') {
                 continue;
             }
-            
-            $normName = strtolower(trim((string)$marker['name']));
-            
+            if (trim((string) ($marker['value'] ?? '')) === '') {
+                continue;
+            }
+
+            $code = $marker['code'] ?? $this->resolveBiomarkerKey((string) $marker['name']);
+            if ($code !== null) {
+                $marker['code'] = $code;
+            }
+            $normName = $code !== null ? 'code:' . $code : strtolower(trim((string) $marker['name']));
+
             if (!isset($uniqueBiomarkers[$normName])) {
                 $uniqueBiomarkers[$normName] = $marker;
             } else {
@@ -347,16 +357,24 @@ PROMPT;
         $contentType = $isPdf ? 'application/pdf' : ($mime ?: 'application/octet-stream');
 
         try {
-            $response = $this->openAiHttpClient($apiKey)
-                ->attach(
-                    'file',
-                    $fileBytes,
-                    $file->getClientOriginalName(),
-                    ['Content-Type' => $contentType]
-                )
-                ->post('https://api.openai.com/v1/files', [
-                    'purpose' => 'user_data',
-                ]);
+            $response = $this->trackOpenAiCall(
+                'file_upload',
+                'POST',
+                'https://api.openai.com/v1/files',
+                false,
+                fn () => $this->openAiHttpClient($apiKey)
+                    ->attach(
+                        'file',
+                        $fileBytes,
+                        $file->getClientOriginalName(),
+                        ['Content-Type' => $contentType]
+                    )
+                    ->post('https://api.openai.com/v1/files', [
+                        'purpose' => 'user_data',
+                    ]),
+                null,
+                $file->getClientOriginalName()
+            );
         } catch (\Exception $e) {
             throw new \RuntimeException('Failed to upload PDF: ' . $file->getClientOriginalName() . '. Error: ' . $e->getMessage());
         }
@@ -402,9 +420,17 @@ PROMPT;
 
         while (time() < $deadline) {
             try {
-                $response = $this->openAiHttpClient($apiKey)
-                    ->timeout(30)
-                    ->get('https://api.openai.com/v1/files/' . $fileId);
+                $response = $this->trackOpenAiCall(
+                    'file_status_check',
+                    'GET',
+                    'https://api.openai.com/v1/files/' . $fileId,
+                    false,
+                    fn () => $this->openAiHttpClient($apiKey)
+                        ->timeout(30)
+                        ->get('https://api.openai.com/v1/files/' . $fileId),
+                    null,
+                    $filename
+                );
 
                 if ($response->successful()) {
                     $data = $response->json();
@@ -440,6 +466,76 @@ PROMPT;
             'file_id' => $fileId,
             'last_status' => $lastStatus,
         ]);
+    }
+
+    /**
+     * Run one OpenAI HTTP call and record it in openai_api_logs (also when it throws).
+     */
+    public function trackOpenAiCall(
+        string $purpose,
+        string $method,
+        string $endpoint,
+        bool $isPaid,
+        callable $send,
+        ?string $model = null,
+        ?string $filename = null
+    ) {
+        $startedAt = microtime(true);
+
+        try {
+            $response = $send();
+        } catch (\Throwable $e) {
+            $this->recordOpenAiCall($purpose, $method, $endpoint, $isPaid, null, $model, $filename, $startedAt, $e->getMessage());
+            throw $e;
+        }
+
+        $this->recordOpenAiCall($purpose, $method, $endpoint, $isPaid, $response, $model, $filename, $startedAt);
+
+        return $response;
+    }
+
+    /**
+     * Never throws: call counting must not break report analysis.
+     */
+    protected function recordOpenAiCall(
+        string $purpose,
+        string $method,
+        string $endpoint,
+        bool $isPaid,
+        $response,
+        ?string $model,
+        ?string $filename,
+        float $startedAt,
+        ?string $error = null
+    ): void {
+        try {
+            $data = $response ? ($response->json() ?? []) : [];
+            $success = $response ? $response->successful() : false;
+            if ($response && !$success && $error === null) {
+                $error = data_get($data, 'error.message') ?: mb_substr($response->body(), 0, 500);
+            }
+            $userId = request()->input('user_id');
+
+            OpenAiApiLog::create([
+                'user_id' => is_numeric($userId) ? (int) $userId : null,
+                'purpose' => $purpose,
+                'method' => $method,
+                'endpoint' => $endpoint,
+                'model' => $model,
+                'is_paid' => $isPaid ? 1 : 0,
+                'http_status' => $response ? $response->status() : null,
+                'success' => $success ? 1 : 0,
+                // Responses API reports input/output tokens, Chat Completions prompt/completion tokens.
+                'input_tokens' => data_get($data, 'usage.input_tokens', data_get($data, 'usage.prompt_tokens')),
+                'output_tokens' => data_get($data, 'usage.output_tokens', data_get($data, 'usage.completion_tokens')),
+                'total_tokens' => data_get($data, 'usage.total_tokens'),
+                'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'filename' => $filename !== null ? mb_substr($filename, 0, 255) : null,
+                'error_message' => $error !== null ? mb_substr($error, 0, 2000) : null,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('OpenAI call log could not be saved', ['message' => $e->getMessage()]);
+        }
     }
 
     /**
@@ -537,6 +633,266 @@ PROMPT;
         return empty($biomarkers) || ($inputTokens > 0 && $inputTokens < 800);
     }
 
+    /** @var array<string, string> Text layer per PDF path, so one upload is parsed once. */
+    protected array $pdfTextLayerCache = [];
+
+    /**
+     * Reading-order text layer of a digital PDF ('' for scanned/image-only PDFs).
+     * Reading order matters: layout-preserving extraction misaligns table columns
+     * (value on one line, its code on the next), which made values land on the wrong biomarker.
+     */
+    public function extractPdfTextLayer(UploadedFile $file): string
+    {
+        $path = (string) $file->getRealPath();
+        if ($path === '' || !is_file($path)) {
+            return '';
+        }
+        if (array_key_exists($path, $this->pdfTextLayerCache)) {
+            return $this->pdfTextLayerCache[$path];
+        }
+
+        $text = '';
+
+        if (class_exists(\Smalot\PdfParser\Parser::class)) {
+            try {
+                $pdf = (new \Smalot\PdfParser\Parser())->parseFile($path);
+                $pages = [];
+                foreach ($pdf->getPages() as $page) {
+                    $pages[] = $page->getText();
+                }
+                $text = implode("\n", $pages);
+            } catch (\Throwable $e) {
+                Log::warning('PDF text layer: smalot parser failed', ['message' => $e->getMessage()]);
+            }
+        }
+
+        // Poppler, when installed on the server, in raw (content-stream order) mode.
+        if (trim($text) === '') {
+            try {
+                $process = new \Symfony\Component\Process\Process(['pdftotext', '-raw', '-enc', 'UTF-8', $path, '-']);
+                $process->setTimeout(60);
+                $process->run();
+                if ($process->isSuccessful()) {
+                    $text = $process->getOutput();
+                }
+            } catch (\Throwable $e) {
+                // pdftotext not installed.
+            }
+        }
+
+        $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8');
+        $text = str_replace(["\t", "\u{00A0}"], ' ', $text);
+        $text = trim(preg_replace('/[ ]{2,}/', ' ', $text) ?? $text);
+
+        Log::info('PDF text layer extracted', [
+            'filename' => $file->getClientOriginalName(),
+            'text_length' => strlen($text),
+        ]);
+
+        return $this->pdfTextLayerCache[$path] = $text;
+    }
+
+    /**
+     * Deterministically parse table rows "[CODE] Test name  value[unit]  low - high  [flag]"
+     * from the PDF text layer. Only rows that resolve to a SenoClock biomarker are kept,
+     * so the result is high-precision and used to correct/complete the AI extraction.
+     *
+     * @return array<string, array{name:string,code:string,value:string,unit:string,range:string,source_document:string}>
+     */
+    public function parseBiomarkerRowsFromText(string $text, string $sourceDocument): array
+    {
+        $rowPattern = '/^(?<name>[A-Za-z][^\n]*?)\s*(?<value>[<>]?\d+(?:\.\d+)?)\s*'
+            . '(?<unit>(?:x\s*)?10\^\d+\s*\/\s*[A-Za-zµμ]+|[A-Za-zµμ%][^\s]*?)?\s*'
+            . '(?<lo>\d+(?:\.\d+)?)\s*[-–—]\s*(?<hi>\d+(?:\.\d+)?)'
+            . '[\s\-–—↑↓*]*(?:H|L|HH|LL|High|Low|Normal|Abnormal)?[\s\-–—↑↓*]*$/u';
+
+        $rows = [];
+        $pendingName = [];
+
+        foreach (preg_split('/\r\n|\r|\n/', $text) ?: [] as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+
+            // A wrapped test name ("MCHC / Mean Corpuscular Haemoglobin / Concentration")
+            // is followed by a line holding only "value unit range".
+            $candidate = $line;
+            if (preg_match('/^[<>]?\d/', $line) && !empty($pendingName)) {
+                $candidate = implode(' ', $pendingName) . ' ' . $line;
+            }
+
+            if (preg_match($rowPattern, $candidate, $m) && strlen(trim($m['name'])) <= 90) {
+                $pendingName = [];
+                $name = trim($m['name'], " \t:.-");
+                $key = $this->resolveBiomarkerKey($name);
+                // "<100" is a censored result, not 100: leave it to the AI extraction as-is.
+                if ($key === null || isset($rows[$key]) || preg_match('/^[<>]/', $m['value'])) {
+                    continue;
+                }
+
+                $rows[$key] = [
+                    'name' => $this->stripLeadingCode($name, $key) ?: $key,
+                    'code' => $key,
+                    'value' => $m['value'],
+                    'unit' => trim((string) ($m['unit'] ?? '')),
+                    'range' => $m['lo'] . ' - ' . $m['hi'],
+                    'source_document' => $sourceDocument,
+                ];
+                continue;
+            }
+
+            if (!preg_match('/\d/', $line) && strlen($line) <= 60) {
+                $pendingName[] = $line;
+                $pendingName = array_slice($pendingName, -3);
+            } else {
+                $pendingName = [];
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * SenoClock code for a biomarker name, also when the report prefixes the name with its
+     * code ("GLC Glucose", "ATLYMPHAtypical lymphocytes").
+     */
+    public function resolveBiomarkerKey(string $name): ?string
+    {
+        $name = trim($name);
+        if ($name === '') {
+            return null;
+        }
+
+        $aiService = app(SenoclockAiService::class);
+        $mapping = $aiService->getSenoclockMapping();
+        $codes = array_values(array_unique(array_map('strval', $mapping)));
+        usort($codes, fn ($a, $b) => strlen($b) <=> strlen($a));
+
+        foreach ($codes as $code) {
+            $isTokenPrefix = preg_match('/^' . preg_quote($code, '/') . '(?=\s|$)/', $name);
+            $isGluedPrefix = preg_match('/^' . preg_quote($code, '/') . '(?=[A-Z][a-z])/', $name);
+            if (!$isTokenPrefix && !$isGluedPrefix) {
+                continue;
+            }
+
+            $rest = trim(substr($name, strlen($code)));
+            if ($rest === '') {
+                return $code;
+            }
+            $restKey = $aiService->findSenoclockKey($rest, $mapping);
+            if ($restKey === $code) {
+                return $code;
+            }
+            // "CA 19-9" is a tumour marker, not Calcium: a code followed by a different
+            // test (or by digits) must not borrow the code.
+            if ($restKey === null && !preg_match('/^\d/', $rest)) {
+                return $code;
+            }
+            break;
+        }
+
+        return $aiService->findSenoclockKey($name, $mapping);
+    }
+
+    /**
+     * "GLC Glucose" -> "Glucose", but "LDL Cholesterol" stays whole ("Cholesterol" alone is another test).
+     */
+    protected function stripLeadingCode(string $name, string $code): string
+    {
+        if (!str_starts_with($name, $code)) {
+            return $name;
+        }
+
+        $rest = trim(substr($name, strlen($code)));
+        $aiService = app(SenoclockAiService::class);
+        if ($rest !== '' && $aiService->findSenoclockKey($rest, $aiService->getSenoclockMapping()) === $code) {
+            return $rest;
+        }
+
+        return $name;
+    }
+
+    /**
+     * Correct and complete AI-extracted biomarkers with rows parsed from the PDF text layer.
+     * For a digital PDF the text layer is exact, so its value/unit/range wins on conflict;
+     * markers the model skipped are added. Every item gets its SenoClock 'code' when known.
+     */
+    protected function mergeWithTextLayerRows(array $aiBiomarkers, array $rows, string $filename): array
+    {
+        $out = [];
+        $usedKeys = [];
+        $corrected = [];
+
+        foreach ($aiBiomarkers as $item) {
+            if (!is_array($item) || trim((string) ($item['name'] ?? '')) === '') {
+                continue;
+            }
+            $key = $item['code'] ?? $this->resolveBiomarkerKey((string) $item['name']);
+            if ($key !== null) {
+                $item['code'] = $key;
+            }
+
+            if ($key !== null && isset($rows[$key])) {
+                $row = $rows[$key];
+                if ((string) ($item['value'] ?? '') !== $row['value']) {
+                    $corrected[] = ['code' => $key, 'ai_value' => $item['value'] ?? null, 'pdf_value' => $row['value']];
+                }
+                $item['value'] = $row['value'];
+                $item['unit'] = $row['unit'] !== '' ? $row['unit'] : ($item['unit'] ?? '');
+                $item['range'] = $row['range'];
+                $usedKeys[$key] = true;
+            }
+
+            $out[] = $item;
+        }
+
+        $added = [];
+        foreach ($rows as $key => $row) {
+            if (!isset($usedKeys[$key])) {
+                $out[] = $row;
+                $added[] = $key;
+            }
+        }
+
+        Log::info('Biomarkers merged with PDF text layer', [
+            'filename' => $filename,
+            'ai_count' => count($aiBiomarkers),
+            'text_layer_rows' => count($rows),
+            'corrected_values' => $corrected,
+            'added_from_text_layer' => $added,
+            'final_count' => count($out),
+        ]);
+
+        return $out;
+    }
+
+    /**
+     * Sampling params for deterministic extraction. Reasoning models (o-series, gpt-5)
+     * reject temperature, so it is only sent to models that accept it.
+     */
+    protected function deterministicSamplingParams(string $model): array
+    {
+        if (preg_match('/^(o\d|gpt-5)/i', $model)) {
+            return [];
+        }
+
+        return ['temperature' => 0];
+    }
+
+    protected function textLayerPromptSuffix(string $textLayer): string
+    {
+        if (trim($textLayer) === '') {
+            return '';
+        }
+
+        return "\n\nTEXT LAYER of the same PDF (reading order, extracted programmatically). Use it to read values exactly;"
+            . " use the page images for table structure. In this text a result may be glued to its unit,"
+            . " e.g. \"41010^9/l\" means value 410 with unit 10^9/l, and \"4.9mmol/L3.5 - 5.4\" means value 4.9, unit mmol/L, range 3.5 - 5.4."
+            . "\nTake each biomarker's value from its detailed results table row, not from summary/highlight boxes; return each test once."
+            . "\n----- BEGIN TEXT LAYER -----\n" . mb_substr($textLayer, 0, 60000, 'UTF-8') . "\n----- END TEXT LAYER -----";
+    }
+
     public function analyzeSingleUploadedPdf(array $uploadedFile, string $prompt, ?UploadedFile $localFile = null): array
     {
         $apiKey = config('services.openai.api_key');
@@ -553,11 +909,25 @@ PROMPT;
             'has_local_file' => $localFile ? is_file($localFile->getRealPath()) : false,
         ]);
 
+        $hasLocalFile = $localFile && is_file($localFile->getRealPath());
+        $textLayer = $hasLocalFile ? $this->extractPdfTextLayer($localFile) : '';
+        $textRows = $textLayer !== '' ? $this->parseBiomarkerRowsFromText($textLayer, $filename) : [];
+        $prompt .= $this->textLayerPromptSuffix($textLayer);
+
+        Log::info('PDF text layer rows parsed', [
+            'filename' => $filename,
+            'text_length' => strlen($textLayer),
+            'row_count' => count($textRows),
+            'codes' => array_keys($textRows),
+        ]);
+
         // NOTE: Do NOT force text.format=json_object for PDF inputs.
         // Structured JSON mode + scanned/image-only PDFs frequently yields prompt-only
         // token counts (~400) and empty biomarker arrays while still returning HTTP 200.
-        $payload = [
+        // temperature 0: the same report must give the same biomarkers on every upload.
+        $payload = $this->deterministicSamplingParams($pdfModel) + [
             'model' => $pdfModel,
+            'max_output_tokens' => 16000,
             'input' => [
                 [
                     'role' => 'user',
@@ -590,10 +960,18 @@ PROMPT;
 
         $this->logResponsesApiDiagnostics('request_file_id', 'https://api.openai.com/v1/responses', $payload, null, null, $apiKey);
 
-        $response = $this->openAiHttpClient($apiKey)
-            ->asJson()
-            ->timeout(300)
-            ->post('https://api.openai.com/v1/responses', $payload);
+        $response = $this->trackOpenAiCall(
+            'pdf_analysis_file_id',
+            'POST',
+            'https://api.openai.com/v1/responses',
+            true,
+            fn () => $this->openAiHttpClient($apiKey)
+                ->asJson()
+                ->timeout(300)
+                ->post('https://api.openai.com/v1/responses', $payload),
+            $pdfModel,
+            $filename
+        );
 
         $responseData = $response->json() ?? [];
         $inputTokens = (int) data_get($responseData, 'usage.input_tokens', 0);
@@ -639,7 +1017,8 @@ PROMPT;
 
         // Scanned/image-only PDFs: OpenAI may accept input_file but not expand page images into context.
         // Recover by sending embedded raster page images as Responses input_image parts.
-        if (empty($biomarkers) && $localFile && is_file($localFile->getRealPath())) {
+        // A digital PDF (it has a text layer) is not a scan, so this path does not apply.
+        if (empty($biomarkers) && $textLayer === '' && $hasLocalFile) {
             Log::warning('PDF input_file paths failed — retrying with embedded page images as input_image', [
                 'filename' => $filename,
                 'file_id' => $fileId,
@@ -661,6 +1040,10 @@ PROMPT;
                 'filename' => $filename,
                 'biomarker_count' => count($biomarkers),
             ]);
+        }
+
+        if (!empty($textRows)) {
+            $biomarkers = $this->mergeWithTextLayerRows($biomarkers, $textRows, $filename);
         }
 
         if (empty($biomarkers)) {
@@ -815,8 +1198,9 @@ PROMPT;
         try {
             $pdfModel = config('services.openai.pdf_model', 'gpt-4o');
             // Same as file_id path: avoid text.format=json_object for PDF ingestion reliability.
-            $payload = [
+            $payload = $this->deterministicSamplingParams($pdfModel) + [
                 'model' => $pdfModel,
+                'max_output_tokens' => 16000,
                 'input' => [[
                     'role' => 'user',
                     'content' => [
@@ -835,10 +1219,18 @@ PROMPT;
 
             $this->logResponsesApiDiagnostics('request_inline_base64', 'https://api.openai.com/v1/responses', $payload, null, null, $apiKey);
 
-            $response = $this->openAiHttpClient($apiKey)
-                ->asJson()
-                ->timeout(300)
-                ->post('https://api.openai.com/v1/responses', $payload);
+            $response = $this->trackOpenAiCall(
+                'pdf_analysis_inline_base64',
+                'POST',
+                'https://api.openai.com/v1/responses',
+                true,
+                fn () => $this->openAiHttpClient($apiKey)
+                    ->asJson()
+                    ->timeout(300)
+                    ->post('https://api.openai.com/v1/responses', $payload),
+                $pdfModel,
+                $filename
+            );
 
             $responseData = $response->json() ?? [];
             $inputTokens = (int) data_get($responseData, 'usage.input_tokens', 0);
@@ -913,8 +1305,9 @@ PROMPT;
             'text' => $prompt . "\n\nsource_document must be: {$filename}\nLab report pages are attached as images (scanned PDF recovery). Extract ALL visible biomarkers.\nReturn ONLY valid JSON.",
         ];
 
-        $payload = [
+        $payload = $this->deterministicSamplingParams($pdfModel) + [
             'model' => $pdfModel,
+            'max_output_tokens' => 16000,
             'input' => [[
                 'role' => 'user',
                 'content' => $content,
@@ -937,10 +1330,18 @@ PROMPT;
         $this->logResponsesApiDiagnostics('request_embedded_images', 'https://api.openai.com/v1/responses', $payload, null, null, $apiKey);
 
         try {
-            $response = $this->openAiHttpClient($apiKey)
-                ->asJson()
-                ->timeout(300)
-                ->post('https://api.openai.com/v1/responses', $payload);
+            $response = $this->trackOpenAiCall(
+                'pdf_analysis_embedded_images',
+                'POST',
+                'https://api.openai.com/v1/responses',
+                true,
+                fn () => $this->openAiHttpClient($apiKey)
+                    ->asJson()
+                    ->timeout(300)
+                    ->post('https://api.openai.com/v1/responses', $payload),
+                $pdfModel,
+                $filename
+            );
 
             $responseData = $response->json() ?? [];
             $this->logResponsesApiDiagnostics('response_embedded_images', 'https://api.openai.com/v1/responses', $payload, $response, $responseData, $apiKey);
@@ -1036,63 +1437,36 @@ PROMPT;
                 'readable' => is_readable($file->getRealPath()),
             ]);
 
+            // Only biomarkers that carry a value are kept: name-only guesses scraped from text
+            // made panels look "available" while SenoClock received no value for them.
             $textResult = $this->extractWithOpenAi($file, '');
-            if ($textResult && !empty($textResult['extracted_biomarkers'])) {
-                $out = [];
-                foreach ($textResult['extracted_biomarkers'] as $item) {
-                    if (is_array($item)) {
-                        $name = trim((string) ($item['name'] ?? ''));
-                        if ($name === '') {
-                            continue;
-                        }
-                        $out[] = [
-                            'name' => $name,
-                            'value' => $item['value'] ?? null,
-                            'unit' => $item['unit'] ?? null,
-                            'range' => $item['range'] ?? null,
-                            'source_document' => $filename,
-                        ];
-                    } else {
-                        $name = trim((string) $item);
-                        if ($name !== '') {
-                            $out[] = [
-                                'name' => $name,
-                                'value' => null,
-                                'unit' => null,
-                                'range' => null,
-                                'source_document' => $filename,
-                            ];
-                        }
-                    }
+            $out = [];
+            foreach (($textResult['extracted_biomarkers'] ?? []) as $item) {
+                if (!is_array($item)) {
+                    continue;
                 }
-                Log::info('Fallback PDF extraction result', [
-                    'filename' => $filename,
-                    'source' => $textResult['source'] ?? 'openai_text',
-                    'biomarker_count' => count($out),
-                    'text_length' => strlen((string) ($textResult['ocr_text'] ?? '')),
-                ]);
-                return $out;
+                $name = trim((string) ($item['name'] ?? ''));
+                $value = trim((string) ($item['value'] ?? ''));
+                if ($name === '' || $value === '') {
+                    continue;
+                }
+                $out[] = [
+                    'name' => $name,
+                    'value' => $value,
+                    'unit' => $item['unit'] ?? null,
+                    'range' => $item['range'] ?? null,
+                    'source_document' => $filename,
+                ];
             }
 
-            $pdfText = $this->extractTextFromPdf($file);
             Log::info('Fallback PDF extraction result', [
                 'filename' => $filename,
-                'source' => 'local_pdf_text',
-                'text_length' => strlen($pdfText),
-                'ocr_text_length' => 0,
+                'source' => $textResult['source'] ?? 'openai_text',
+                'biomarker_count' => count($out),
+                'text_length' => strlen((string) ($textResult['ocr_text'] ?? '')),
             ]);
 
-            if ($pdfText === '') {
-                return [];
-            }
-
-            return array_map(fn ($name) => [
-                'name' => $name,
-                'value' => null,
-                'unit' => null,
-                'range' => null,
-                'source_document' => $filename,
-            ], $this->extractBiomarkerNamesFromText($pdfText));
+            return $out;
         } catch (\Throwable $e) {
             Log::error('PDF text fallback failed', [
                 'filename' => $filename,
@@ -1151,6 +1525,9 @@ PROMPT;
         foreach ($extractedBiomarkers as $item) {
             if (is_array($item)) {
                 $extractedNames[] = $item['name'] ?? '';
+                if (!empty($item['code'])) {
+                    $extractedNames[] = (string) $item['code'];
+                }
             } else {
                 $extractedNames[] = $item;
             }
@@ -1380,11 +1757,19 @@ PROMPT;
         }
 
         try {
-            $response = Http::timeout(240)
-                ->withoutVerifying()
-                ->withToken($apiKey)
-                ->acceptJson()
-                ->post('https://api.openai.com/v1/chat/completions', $payload);
+            $response = $this->trackOpenAiCall(
+                'report_text_or_image_analysis',
+                'POST',
+                'https://api.openai.com/v1/chat/completions',
+                true,
+                fn () => Http::timeout(240)
+                    ->withoutVerifying()
+                    ->withToken($apiKey)
+                    ->acceptJson()
+                    ->post('https://api.openai.com/v1/chat/completions', $payload),
+                $payload['model'] ?? null,
+                $file->getClientOriginalName()
+            );
 
             if (!$response->successful()) {
                 Log::error('OpenAI lab report analysis failed', [
@@ -1483,8 +1868,9 @@ PROMPT;
 
         return [
             'model' => config('services.openai.model', 'gpt-4o'),
-            'temperature' => 0.3,
-            'max_tokens' => 2000,
+            'temperature' => 0,
+            // 2000 truncated the JSON of 50+ biomarker reports, which then failed to parse.
+            'max_tokens' => 12000,
             'response_format' => ['type' => 'json_object'],
             'messages' => [
                 ['role' => 'system', 'content' => $system],
@@ -1503,8 +1889,9 @@ PROMPT;
     {
         return [
             'model' => config('services.openai.model', 'gpt-4o-mini'),
-            'temperature' => 0.3,
-            'max_tokens' => 2000,
+            'temperature' => 0,
+            // 2000 truncated the JSON of 50+ biomarker reports, which then failed to parse.
+            'max_tokens' => 12000,
             'response_format' => ['type' => 'json_object'],
             'messages' => [
                 ['role' => 'system', 'content' => $this->analystSystemPrompt()],
@@ -1592,11 +1979,18 @@ PROMPT;
         ];
 
         try {
-            $response = Http::timeout(240)
-                ->withoutVerifying()
-                ->withToken($apiKey)
-                ->acceptJson()
-                ->post('https://api.openai.com/v1/chat/completions', $payload);
+            $response = $this->trackOpenAiCall(
+                'senoclock_marker_extraction',
+                'POST',
+                'https://api.openai.com/v1/chat/completions',
+                true,
+                fn () => Http::timeout(240)
+                    ->withoutVerifying()
+                    ->withToken($apiKey)
+                    ->acceptJson()
+                    ->post('https://api.openai.com/v1/chat/completions', $payload),
+                $payload['model'] ?? null
+            );
 
             if (!$response->successful()) {
                 Log::error('OpenAI Senoclock extraction failed', [
@@ -1644,6 +2038,12 @@ PROMPT;
         $mime = $file->getMimeType() ?: '';
         if ($extension !== 'pdf' && !str_contains($mime, 'pdf')) {
             return '';
+        }
+
+        // Proper PDF parsing (handles compressed streams). The byte scan below is only a last resort.
+        $textLayer = $this->extractPdfTextLayer($file);
+        if ($textLayer !== '') {
+            return $textLayer;
         }
 
         $raw = @file_get_contents($file->getRealPath());
