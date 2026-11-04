@@ -121,6 +121,14 @@ class MajorOrganTestController extends Controller
             $files = array_merge($files, is_array($docArray) ? $docArray : [$docArray]);
         }
         $files = array_filter($files);
+        $labReport = null;
+
+        \Illuminate\Support\Facades\Log::info('analyzeReport: request received', [
+            'user_id' => (int) $request->user_id,
+            'package_id' => $request->input('package_id'),
+            'file_count' => count($files),
+            'has_ocr_text' => trim((string) $request->input('ocr_text')) !== '',
+        ]);
 
         try {
             foreach ($files as $file) {
@@ -175,6 +183,12 @@ class MajorOrganTestController extends Controller
 
             $analysis['lab_report_id'] = $labReport->id;
             $analysis['user_id'] = (int) $request->user_id;
+
+            \Illuminate\Support\Facades\Log::info('analyzeReport: lab_report_id generated', [
+                'user_id' => (int) $request->user_id,
+                'lab_report_id' => $labReport->id,
+                'lab_report_generated' => true,
+            ]);
 
             $currency = CurrencyHelper::getUserCurrency();
             $analysis['to_pay'] = CurrencyHelper::convert((float) ($analysis['to_pay'] ?? 0), $currency);
@@ -451,8 +465,12 @@ class MajorOrganTestController extends Controller
                     'missing_biomarkers' => $missingRequired,
                     'mapped_markers' => array_keys($senoclockMarkers ?? []),
                 ];
-                \Illuminate\Support\Facades\Log::warning($analysis['senoclock']['message'], [
+                \Illuminate\Support\Facades\Log::warning('analyzeReport: lab_report_id generated but omitted from response', [
+                    'user_id' => (int) $request->user_id,
                     'lab_report_id' => $labReport->id ?? null,
+                    'lab_report_generated' => !empty($labReport->id),
+                    'included_in_response' => false,
+                    'reason' => 'required biomarkers are missing',
                     'missing_biomarkers' => $missingRequired,
                     'mapped_markers' => array_keys($senoclockMarkers ?? []),
                 ]);
@@ -535,6 +553,17 @@ class MajorOrganTestController extends Controller
                 );
             }
 
+            $responseLabReportId = $analysis['lab_report_id'] ?? null;
+            \Illuminate\Support\Facades\Log::info('analyzeReport: response lab_report_id', [
+                'user_id' => (int) $request->user_id,
+                'lab_report_id' => $labReport->id ?? null,
+                'lab_report_generated' => !empty($labReport->id),
+                'included_in_response' => $responseLabReportId !== null,
+                'response_lab_report_id' => $responseLabReportId,
+                'senoclock_status' => $labReport->senoclock_status ?? null,
+                'missing_required_count' => $analysis['missing_required_count'] ?? 0,
+            ]);
+
             return response()->json([
                 'status' => true,
                 'message' => 'AI analysis completed successfully',
@@ -542,6 +571,14 @@ class MajorOrganTestController extends Controller
                 'data' => $analysis,
             ]);
         } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('analyzeReport: failed before returning lab_report_id', [
+                'user_id' => $request->input('user_id'),
+                'lab_report_id' => $labReport->id ?? null,
+                'lab_report_generated' => !empty($labReport?->id),
+                'included_in_response' => false,
+                'exception' => $e->getMessage(),
+            ]);
+
             return response()->json([
                 'status' => false,
                 'message' => $e->getMessage(),
@@ -593,7 +630,20 @@ class MajorOrganTestController extends Controller
             'lab_report_id' => 'required_without_all:senoclock_id,user_id|integer|exists:lab_reports,id',
         ]);
 
+        \Illuminate\Support\Facades\Log::info('generateSenoclockReport: request received', [
+            'user_id' => $request->input('user_id'),
+            'lab_report_id' => $request->input('lab_report_id'),
+            'senoclock_id' => $request->input('senoclock_id'),
+            'lab_report_id_present' => $request->filled('lab_report_id'),
+        ]);
+
         if ($validator->fails()) {
+            \Illuminate\Support\Facades\Log::warning('generateSenoclockReport: validation failed', [
+                'user_id' => $request->input('user_id'),
+                'lab_report_id' => $request->input('lab_report_id'),
+                'errors' => $validator->errors()->all(),
+            ]);
+
             return response()->json([
                 'status' => false,
                 'message' => $validator->errors()->first(),
@@ -613,6 +663,11 @@ class MajorOrganTestController extends Controller
         } elseif ($request->filled('senoclock_id')) {
             $labReport = LabReport::where('senoclock_id', $senoclockId)->first();
         } elseif ($request->filled('user_id')) {
+            \Illuminate\Support\Facades\Log::info('generateSenoclockReport: lab_report_id missing, falling back to user reports', [
+                'user_id' => $request->input('user_id'),
+                'lab_report_id_present' => false,
+            ]);
+
             $completedReports = LabReport::where('user_id', $request->user_id)
                 ->whereNotNull('senoclock_pdf_path')
                 ->where('senoclock_status', 'completed')
@@ -620,6 +675,11 @@ class MajorOrganTestController extends Controller
                 ->get();
 
             if ($completedReports->isNotEmpty()) {
+                \Illuminate\Support\Facades\Log::info('generateSenoclockReport: fallback returned completed reports', [
+                    'user_id' => $request->input('user_id'),
+                    'lab_report_ids' => $completedReports->pluck('id')->all(),
+                ]);
+
                 $data = $completedReports->map(function ($report) {
                     return [
                         'lab_report_id' => $report->id,
@@ -642,11 +702,29 @@ class MajorOrganTestController extends Controller
         }
 
         if (!$labReport) {
+            \Illuminate\Support\Facades\Log::warning('generateSenoclockReport: lab report not found', [
+                'user_id' => $request->input('user_id'),
+                'lab_report_id' => $request->input('lab_report_id'),
+                'senoclock_id' => $request->input('senoclock_id'),
+                'lookup' => $request->filled('lab_report_id')
+                    ? 'lab_report_id'
+                    : ($request->filled('senoclock_id') ? 'senoclock_id' : 'latest_by_user_id'),
+            ]);
+
             return response()->json([
                 'status' => false,
                 'message' => 'Lab report not found.',
             ], 404);
         }
+
+        \Illuminate\Support\Facades\Log::info('generateSenoclockReport: lab report resolved', [
+            'user_id' => $request->input('user_id'),
+            'requested_lab_report_id' => $request->input('lab_report_id'),
+            'lab_report_id' => $labReport->id,
+            'senoclock_id' => $labReport->senoclock_id,
+            'senoclock_status' => $labReport->senoclock_status,
+            'has_pdf' => !empty($labReport->senoclock_pdf_path),
+        ]);
 
         $markerCount = is_array($labReport->markers) ? count($labReport->markers) : 0;
         if ($markerCount === 0) {

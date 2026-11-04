@@ -26,6 +26,8 @@ use App\Models\UserLongevityPlan;
 use App\Models\LongevityPlan;
 use App\Models\LabReport;
 use App\Models\MajorOrganPackage;
+use App\Mail\RetreatPlanPurchaseMail;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Http\Request;
 use App\Helpers\EmailHelpers;
 use Illuminate\Support\Facades\Validator;
@@ -3054,7 +3056,89 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
 
         Log::info('Longevity payment success: stored UserLongevityPlan in DB', ['order_id' => $orderId] + $payload);
 
+        // Send email to team if a retreat plan was purchased
+        if (!empty($longevityPlanIds)) {
+            $this->notifyTeamRetreatPlanPurchase($userId, $longevityPlanIds, $orderId);
+        }
+
         return $payload['plan_id'];
+    }
+
+    /**
+     * Send notification email to the team when a patient buys a Retreat Plan.
+     */
+    private function notifyTeamRetreatPlanPurchase($userId, $longevityPlanIds, string $orderId = ''): void
+    {
+        Log::info('Retreat plan purchase: starting notification email check', [
+            'user_id' => $userId,
+            'longevity_plan_ids' => $longevityPlanIds,
+            'order_id' => $orderId,
+        ]);
+
+        try {
+            $user = Users::find($userId);
+            if (!$user) {
+                Log::warning('Retreat plan purchase: user not found, email NOT sent', [
+                    'user_id' => $userId,
+                    'order_id' => $orderId,
+                ]);
+                return;
+            }
+
+            $planNames = [];
+            foreach (array_filter(array_map('trim', explode(',', (string) $longevityPlanIds))) as $pid) {
+                $plan = LongevityPlan::find($pid);
+                if ($plan && !empty($plan->title)) {
+                    $planNames[] = $plan->title;
+                }
+            }
+
+            $planNameString = !empty($planNames) ? implode(', ', $planNames) : 'Retreat Plan';
+
+            $mailable = new RetreatPlanPurchaseMail($user, $planNameString);
+
+            // Render email body for full audit visibility in logs
+            $renderedHtml = '';
+            try {
+                $renderedHtml = $mailable->render();
+            } catch (\Throwable $renderEx) {
+                $renderedHtml = 'Could not render HTML preview: ' . $renderEx->getMessage();
+            }
+
+            $patientName = trim((string) ($user->fullname ?? $user->name ?? '-'));
+            $patientEmail = $user->email ?? $user->identity ?? '-';
+            $patientPhone = trim((string) (($user->country_code ?? '') . ' ' . ($user->phone_number ?? '')));
+
+            Log::info('Retreat plan purchase: preparing to send email', [
+                'order_id'       => $orderId,
+                'patient_id'     => $user->id,
+                'patient_name'   => $patientName,
+                'patient_email'  => $patientEmail,
+                'patient_phone'  => $patientPhone !== '' ? $patientPhone : '-',
+                'plan_name'      => $planNameString,
+                'subject'        => 'New Retreat Plan Purchase – ' . $patientName,
+                'to'             => 'sakshi.k@reapmind.com',
+            ]);
+
+            Mail::to('sakshi.k@reapmind.com')
+                ->send($mailable);
+
+            Log::info('Retreat plan purchase: notification email sent successfully', [
+                'user_id'   => $userId,
+                'order_id'  => $orderId,
+                'plan_name' => $planNameString,
+                'to'        => 'sakshi.k@reapmind.com',
+                'status'    => 'SENT',
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Retreat plan purchase: notification email failed to send', [
+                'user_id'   => $userId,
+                'order_id'  => $orderId,
+                'error'     => $e->getMessage(),
+                'trace'     => $e->getTraceAsString(),
+                'status'    => 'FAILED',
+            ]);
+        }
     }
 
     function convertInrToAed($amountInINR)

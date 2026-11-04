@@ -3394,54 +3394,52 @@ Team Mulk Med.";
             }
         }
 
-        // Appointments are hidden from the appointment banner for now.
-        // if ($request->has('user_id')) {
-        //     $appointments = Appointments::where('user_id', $request->user_id)
-        //         ->where('status', Constants::orderAccepted)
-        //         ->orderBy('date', 'asc')
-        //         ->orderBy('time', 'asc')
-        //         ->get();
-        //
-        //     if ($appointments->count()) {
-        //         $appointmentsWithJitsi = [];
-        //
-        //         foreach ($appointments as $appointment) {
-        //             $jitsi_meeting = JitsiMeeting::where('appointment_id', $appointment->id)->first();
-        //             if ($jitsi_meeting) {
-        //                 $appointment->jitsi_link = url("/api/v1/join_jitsi_meeting?user_id={$appointment->user_id}&room={$jitsi_meeting->room}");;
-        //                 $appointment->image = asset('storage/uploads/dashboard_appointment_banner.png');
-        //                 $appointmentsWithJitsi[] = $appointment;
-        //             }
-        //
-        //             $vital_scan = AI_Vital::where('user_id',$request->user_id)->where('appointment_id',$appointment->id)->get();
-        //             $isVitalScanDone = 0;
-        //
-        //             if(count($vital_scan)){
-        //                 $isVitalScanDone = 1;
-        //             }
-        //             $appointment->is_vital_scan_done = $isVitalScanDone;
-        //         }
-        //
-        //         if (count($appointmentsWithJitsi)) {
-        //             $appointmentBanner = new \stdClass();
-        //             $appointmentBanner->id = 2;
-        //             $appointmentBanner->section_name = "appointment_banner";
-        //             $appointmentBanner->section_type = "appointment_banner";
-        //             $appointmentBanner->section_data = $appointmentsWithJitsi;
-        //
-        //             array_splice($sectionSequence, 1, 0, [$appointmentBanner]);
-        //
-        //             foreach ($sectionSequence as $index => $sec) {
-        //                 $sec->id = $index + 1;
-        //             }
-        //         }
-        //     }
-        //
-        // }
+        if ($request->has('user_id')) {
+            $appointments = Appointments::where('user_id', $request->user_id)
+                ->where('status', Constants::orderAccepted)
+                ->orderBy('date', 'asc')
+                ->orderBy('time', 'asc')
+                ->get();
 
-        // Show the Mulk Longevity Care and Mulk Longevity Lab Report cards in the appointment
-        // banner's spot (from the second position), keeping their own section_type so the app
-        // renders them as banner cards.
+            if ($appointments->count()) {
+                $appointmentsWithJitsi = [];
+
+                foreach ($appointments as $appointment) {
+                    $jitsi_meeting = JitsiMeeting::where('appointment_id', $appointment->id)->first();
+                    if ($jitsi_meeting) {
+                        $appointment->jitsi_link = url("/api/v1/join_jitsi_meeting?user_id={$appointment->user_id}&room={$jitsi_meeting->room}");
+                        $appointment->image = asset('storage/uploads/dashboard_appointment_banner.png');
+                        $appointmentsWithJitsi[] = $appointment;
+                    }
+
+                    $vital_scan = AI_Vital::where('user_id',$request->user_id)->where('appointment_id',$appointment->id)->get();
+                    $isVitalScanDone = 0;
+
+                    if(count($vital_scan)){
+                        $isVitalScanDone = 1;
+                    }
+                    $appointment->is_vital_scan_done = $isVitalScanDone;
+                }
+
+                if (count($appointmentsWithJitsi)) {
+                    $appointmentBanner = new \stdClass();
+                    $appointmentBanner->id = 1;
+                    $appointmentBanner->section_name = "appointment_banner";
+                    $appointmentBanner->section_type = "appointment_banner";
+                    $appointmentBanner->section_data = $appointmentsWithJitsi;
+
+                    // Appointment display 1st
+                    array_unshift($sectionSequence, $appointmentBanner);
+
+                    foreach ($sectionSequence as $index => $sec) {
+                        $sec->id = $index + 1;
+                    }
+                }
+            }
+
+        }
+
+        // Show the Mulk Longevity Care and Mulk Longevity Lab Report cards immediately after the appointment banner
         $longevityCards = [];
         // Lab Report card first (only present for users who bought a plan), then Longevity Care.
         foreach (['mulk_longevity_lab_report', 'mulk_longevity_care'] as $longevityType) {
@@ -3454,7 +3452,17 @@ Team Mulk Med.";
             }
         }
         if (!empty($longevityCards)) {
-            array_splice($sectionSequence, min(1, count($sectionSequence)), 0, $longevityCards);
+            // Find appointment banner position; if present, insert directly after it
+            $appointmentIndex = null;
+            foreach ($sectionSequence as $index => $sec) {
+                if (strtolower((string) $sec->section_type) === 'appointment_banner') {
+                    $appointmentIndex = $index;
+                    break;
+                }
+            }
+
+            $insertLongevityAt = ($appointmentIndex !== null) ? ($appointmentIndex + 1) : 0;
+            array_splice($sectionSequence, $insertLongevityAt, 0, $longevityCards);
         }
 
         // Worldwide Best Treatments Finder sits immediately before Common Health Problems.

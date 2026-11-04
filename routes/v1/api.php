@@ -342,6 +342,7 @@ use App\Http\Controllers\v1\PatientEmrReportController;
         Route::post('saveSelection', [MajorOrganTestController::class, 'saveSelection'])->middleware('checkHeader')->name('saveSelection');
         Route::get('getSelection', [MajorOrganTestController::class, 'getSelection'])->middleware('checkHeader')->name('getSelection');
         Route::get('downloadSenoclockReport/{id}', [MajorOrganTestController::class, 'downloadSenoclockReport'])->name('downloadSenoclockReport');
+        Route::get('homeSampleCollection/fastingInstructions', [HomeSampleCollectionController::class, 'fastingInstructions'])->middleware('checkHeader')->name('homeSampleCollection.fastingInstructions');
         Route::get('homeSampleCollection/options', [HomeSampleCollectionController::class, 'options'])->middleware('checkHeader')->name('homeSampleCollection.options');
         Route::post('homeSampleCollection/save', [HomeSampleCollectionController::class, 'save'])->middleware('checkHeader')->name('homeSampleCollection.save');
         Route::get('homeSampleCollection/list', [HomeSampleCollectionController::class, 'list'])->middleware('checkHeader')->name('homeSampleCollection.list');

@@ -213,6 +213,9 @@ class NewShenaiCareController extends Controller
                     'organ_health_check_count' => $summary['organ_health_check_count'],
                     'total_biomarkers' => $summary['total_biomarkers'],
                     'summary' => $summary['summary'],
+                    // Static note. No extra table: the app shows fasting_text only when fasting is true.
+                    'fasting' => true,
+                    'fasting_text' => 'Fasting 8-10 hours needed',
                 ];
             })->values();
 

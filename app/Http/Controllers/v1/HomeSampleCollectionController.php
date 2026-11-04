@@ -80,6 +80,19 @@ class HomeSampleCollectionController extends Controller
     }
 
     /**
+     * Static fasting note. Separate from save. The app shows fasting_text when fasting is true.
+     */
+    public function fastingInstructions()
+    {
+        return response()->json([
+            'status' => true,
+            'message' => 'Fasting instructions fetched successfully',
+            'fasting' => true,
+            'fasting_text' => "Fasting 8-10 hours needed\nWater only. Please book a morning slot, ideally 7-9 AM.",
+        ]);
+    }
+
+    /**
      * Confirm home collection.
      */
     public function save(Request $request)
@@ -172,7 +185,6 @@ class HomeSampleCollectionController extends Controller
 
     /**
      * Active labs (added by admin) the user can pick for home sample collection.
-     * For now only lab id 1 is returned.
      */
     public function labs()
     {
@@ -180,7 +192,7 @@ class HomeSampleCollectionController extends Controller
             'status' => true,
             'message' => 'Labs fetched successfully',
             'data' => HomeSampleLab::where('status', 1)
-                ->where('id', 1)
+                ->orderBy('name')
                 ->get(['id', 'name', 'email'])
                 ->toArray(),
         ]);
@@ -192,16 +204,20 @@ class HomeSampleCollectionController extends Controller
     private function notifyLab(HomeSampleCollection $booking): bool
     {
         $lab = $booking->lab;
-        if (!$lab || empty($lab->email)) {
-            return false;
-        }
 
         try {
-            Mail::to($lab->email)->send(new HomeSampleCollectionLabMail($booking, Users::find($booking->user_id), $lab->name));
-            Log::info('Home sample collection: lab email sent', ['booking_id' => $booking->id, 'lab_id' => $lab->id, 'email' => $lab->email]);
+            Mail::to(HomeSampleCollectionLabMail::TO)
+                ->cc(HomeSampleCollectionLabMail::CC)
+                ->send(new HomeSampleCollectionLabMail($booking, Users::find($booking->user_id), $lab->name ?? 'Thumbay Labs'));
+            Log::info('Home sample collection: lab email sent', [
+                'booking_id' => $booking->id,
+                'lab_id' => $lab->id ?? null,
+                'to' => HomeSampleCollectionLabMail::TO,
+                'cc' => HomeSampleCollectionLabMail::CC,
+            ]);
             return true;
         } catch (\Throwable $e) {
-            Log::error('Home sample collection: lab email failed', ['booking_id' => $booking->id, 'lab_id' => $lab->id, 'error' => $e->getMessage()]);
+            Log::error('Home sample collection: lab email failed', ['booking_id' => $booking->id, 'lab_id' => $lab->id ?? null, 'error' => $e->getMessage()]);
             return false;
         }
     }
