@@ -51,6 +51,22 @@ class ProcessSenoclockIntegration implements ShouldQueue
         $this->mode = $mode;
     }
 
+    /**
+     * queue:work keeps one log file open for the life of the process. If laravel.log
+     * is created again after that, later lines are written to the old file and never
+     * show up. Closing the handle makes the next line open the current file.
+     */
+    private function reopenLog(): void
+    {
+        try {
+            $monolog = Log::getLogger();
+            if (is_object($monolog) && method_exists($monolog, 'close')) {
+                $monolog->close();
+            }
+        } catch (\Throwable $ignored) {
+        }
+    }
+
     private function fail(?LabReport $labReport, string $message, bool $markFailed = true): void
     {
         $this->result = array_merge($this->result, ['status' => 'failed', 'message' => $message]);
@@ -67,6 +83,8 @@ class ProcessSenoclockIntegration implements ShouldQueue
      */
     public function handle(SenoclockService $senoclockService, SenoclockAiService $aiService)
     {
+        $this->reopenLog();
+
         try {
             $labReport = LabReport::find($this->labReportId);
 

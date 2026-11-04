@@ -50,6 +50,7 @@ use App\Models\UserCoupons;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use App\Mail\AiVitalReportMail;
 use App\Services\SenoclockAiService;
 use Carbon\Carbon;
@@ -2482,7 +2483,7 @@ Team Mulk Med.";
         if (!empty($userId)) {
             // A plan is bought when major_organ_user_selections has a paid plan purchase
             // (unpaid checkouts have payment_status 0). Both lab report banners show after
-            // that purchase. Once a report uploaded on or after it is generated, only banner 147 stays.
+            // that purchase. Once a report uploaded on or after it is generated, the section is omitted.
             $paidPlan = MajorOrganUserSelection::where('user_id', $userId)
                 ->whereIn('selection_type', ['longevity', 'package'])
                 ->where('payment_status', 1)
@@ -2494,7 +2495,7 @@ Team Mulk Med.";
                     ->where('created_at', '>=', $paidPlan->created_at)
                     ->where('senoclock_status', 'completed')
                     ->whereNotNull('senoclock_pdf_path')
-                    ->exists();
+                ->exists();
             }
         }
 
@@ -2811,7 +2812,7 @@ Team Mulk Med.";
         // Temporarily hide every dashboard card except longevity, common health problems
         // and Mulk Med virtual hospital doctors. Mulk AI Wellness Health Check is hidden for now.
         // Remove this filter to show all cards again.
-        $visibleSectionTypes = [/* 'mulk_ai_vitals', */ 'mulk_longevity_lab_report', 'mulk_longevity_care', 'common_health_problems', 'mulk_med_virtual_hospital_doctors'];
+        $visibleSectionTypes = [/* 'mulk_ai_vitals', */ 'mulk_longevity_lab_report', 'mulk_longevity_care', /* 'second_medical_openion', */ 'common_health_problems', 'mulk_med_virtual_hospital_doctors', 'doctors_section'];
         $sections = $sections->filter(
             fn($section) => in_array(strtolower((string) $section->section_type), $visibleSectionTypes, true)
         )->values();
@@ -2947,16 +2948,16 @@ Team Mulk Med.";
                 }
             }
 
-            // Mulk Longevity Lab Report: both banners after purchase; only id 147 after the report is generated.
+            // Mulk Longevity Lab Report: both banners after purchase. Hide the section after one generated report.
             if($sequence->section_type == 'mulk_longevity_lab_report')
             {
-                if ($hasBoughtLongevityPlan) {
+                if ($hasBoughtLongevityPlan && !$hasUploadedLabReport) {
                     $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
                                     ->where('is_deleted', 0)
-                                    ->when($hasUploadedLabReport, fn ($query) => $query->where('id', 147))
                                     ->get();
                     if($labReportSection->isNotEmpty())
                     {
+                        $sequence->section_name = 'Mulk Med Longevity Hub Report';
                         $sequence->section_data = $labReportSection;
                         array_push($sectionSequence, $sequence);
                     }
@@ -2975,22 +2976,25 @@ Team Mulk Med.";
                 }
                 if($section->isNotEmpty())
                 {
+                    $sequence->section_name = 'Mulk Med Longevity Hub';
+                    $section->each(function ($banner) {
+                        $banner->name = str_replace('Care', 'Hub', (string) $banner->name) ?: 'Mulk Med Longevity Hub';
+                    });
                     $sequence->section_data = $section;
                     array_push($sectionSequence,$sequence);
                 }
 
-                // Separate section for Mulk Longevity Lab Report (both banners after purchase; only id 147 after the report is generated)
-                if ($hasBoughtLongevityPlan && !$sections->contains('section_type', 'mulk_longevity_lab_report'))
+                // Separate section for Mulk Longevity Lab Report (both banners after purchase; hidden after one generated report)
+                if ($hasBoughtLongevityPlan && !$hasUploadedLabReport && !$sections->contains('section_type', 'mulk_longevity_lab_report'))
                 {
                 $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
                                 ->where('is_deleted', 0)
-                                ->when($hasUploadedLabReport, fn ($query) => $query->where('id', 147))
                                 ->get();
                 if($labReportSection->isNotEmpty())
                 {
                     $labSequence = clone $sequence;
                     $labSequence->id = $sequence->id + 1000; // Give it a unique pseudo ID
-                    $labSequence->section_name = 'Mulk Longevity Lab Report';
+                    $labSequence->section_name = 'Mulk Med Longevity Hub Report';
                     $labSequence->section_type = 'mulk_longevity_lab_report';
                     $labSequence->section_data = $labReportSection;
                     array_push($sectionSequence, $labSequence);
@@ -2998,17 +3002,18 @@ Team Mulk Med.";
                 }
             }
 
-            if($sequence->section_type == "second_medical_openion")
-            {
-                $section = DashboardBanners::where('name', 'Second Medical Opinion (SMO)')
-                                ->where('is_deleted', 0)
-                                ->get();
-                if($section != [])
-                {
-                    $sequence->section_data = $section;
-                    array_push($sectionSequence,$sequence);
-                }
-            }
+            // if($sequence->section_type == "second_medical_openion")
+            // {
+            //     $section = DashboardBanners::where('name', 'Second Medical Opinion (SMO)')
+            //                     ->where('is_deleted', 0)
+            //                     ->get();
+            //     if($section != [])
+            //     {
+            //         $sequence->section_name = 'Worldwide Best Treatments Finder';
+            //         $sequence->section_data = $section;
+            //         array_push($sectionSequence,$sequence);
+            //     }
+            // }
 
             if($sequence->section_type == "common_health_problems")
             {
@@ -3452,6 +3457,26 @@ Team Mulk Med.";
             array_splice($sectionSequence, min(1, count($sectionSequence)), 0, $longevityCards);
         }
 
+        // Worldwide Best Treatments Finder sits immediately before Common Health Problems.
+        // $treatmentsFinder = null;
+        // foreach ($sectionSequence as $index => $sec) {
+        //     if (strtolower((string) $sec->section_type) === 'second_medical_openion') {
+        //         $treatmentsFinder = $sec;
+        //         array_splice($sectionSequence, $index, 1);
+        //         break;
+        //     }
+        // }
+        // if ($treatmentsFinder) {
+        //     $insertAt = count($sectionSequence);
+        //     foreach ($sectionSequence as $index => $sec) {
+        //         if (strtolower((string) $sec->section_type) === 'common_health_problems') {
+        //             $insertAt = $index;
+        //             break;
+        //         }
+        //     }
+        //     array_splice($sectionSequence, $insertAt, 0, [$treatmentsFinder]);
+        // }
+
         // Mulk Med Virtual Hospital Doctors sits below the dashboard cards.
         $virtualHospitalDoctors = [];
         foreach ($sectionSequence as $index => $sec) {
@@ -3463,6 +3488,18 @@ Team Mulk Med.";
         }
         if (!empty($virtualHospitalDoctors)) {
             array_push($sectionSequence, ...$virtualHospitalDoctors);
+        }
+
+        $globalDoctorSections = [];
+        foreach ($sectionSequence as $index => $sec) {
+            if (strtolower((string) $sec->section_type) === 'doctors_section') {
+                $globalDoctorSections[] = $sec;
+                array_splice($sectionSequence, $index, 1);
+                break;
+            }
+        }
+        if (!empty($globalDoctorSections)) {
+            array_push($sectionSequence, ...$globalDoctorSections);
         }
 
         foreach ($sectionSequence as $index => $sec) {

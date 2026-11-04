@@ -24,6 +24,8 @@ use App\Models\BestOfferPlanOrders;
 use App\Models\UserCoupons;
 use App\Models\UserLongevityPlan;
 use App\Models\LongevityPlan;
+use App\Models\LabReport;
+use App\Models\MajorOrganPackage;
 use Illuminate\Http\Request;
 use App\Helpers\EmailHelpers;
 use Illuminate\Support\Facades\Validator;
@@ -1269,6 +1271,139 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
 
             return ['status' => false, 'message' => $e->getMessage()];
         }
+    }
+
+    /**
+     * Pay for an existing-lab package. No file is uploaded.
+     * Amount is the Existing Report Price saved in admin.
+     *
+     * Body: user_id, package_id, price, currency (optional)
+     */
+    function initiatePaymentExistingLabReport(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'user_id' => 'required|integer|exists:users,id',
+            'package_id' => 'required|integer|exists:major_organ_package,id',
+            'price' => 'required|numeric|min:0.01',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'status' => false,
+                'message' => $validator->errors()->first(),
+            ], 422);
+        }
+
+        $package = MajorOrganPackage::where('status', 1)->find($request->package_id);
+        if (!$package) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Report package not found.',
+            ], 404);
+        }
+
+        $currency = CurrencyHelper::getUserCurrency();
+        $adminPrice = $package->existingReportPrice();
+        $amount = (float) $request->price;
+
+        $request->merge([
+            'user_id' => (int) $request->user_id,
+            'package_id' => $package->id,
+            'payable_amount' => $amount,
+            'report_from' => 'package',
+            'currency' => $currency,
+        ]);
+
+        $paymentResponse = $this->initiatePaymentLongevity($request);
+        $payment = $paymentResponse instanceof \Illuminate\Http\JsonResponse
+            ? $paymentResponse->getData(true)
+            : (array) $paymentResponse;
+
+        if (empty($payment['status']) || empty($payment['order_id'])) {
+            return response()->json([
+                'status' => false,
+                'message' => $payment['message'] ?? 'Could not start payment for this report package.',
+            ], 422);
+        }
+
+        $this->storeExistingLabPurchase($request, $package, $adminPrice, $amount, $payment['order_id']);
+
+        return response()->json([
+            'status' => true,
+            'payment_url' => $payment['payment_url'] ?? null,
+            'order_id' => $payment['order_id'],
+            'amount' => number_format($amount, 2, '.', ''),
+            'currency' => $payment['currency'] ?? $currency,
+        ]);
+    }
+
+    /**
+     * Pending existing-lab purchase in the same tables as other plan payments.
+     * Payment success marks both rows paid.
+     *
+     * @return array{user_longevity_plan_id: int, major_organ_user_selection_id: int}
+     */
+    private function storeExistingLabPurchase(Request $request, MajorOrganPackage $package, float $adminPrice, float $amount, string $orderId): array
+    {
+        $summary = $package->cardSummary();
+        $biomarkers = [];
+        $organTests = [];
+        foreach ($package->includedTests() as $test) {
+            $testBiomarkers = is_array($test->biomarkers) ? $test->biomarkers : [];
+            foreach ($testBiomarkers as $biomarker) {
+                $biomarkers[] = $biomarker;
+            }
+            $organTests[] = [
+                'id' => $test->id,
+                'type' => 'organ_test',
+                'name' => $test->name,
+                'icon' => !empty($test->icon) ? ltrim($test->icon, '/') : null,
+                'price' => number_format((float) $test->price, 2, '.', ''),
+                'biomarker_count' => count($testBiomarkers),
+                'biomarkers' => $testBiomarkers,
+            ];
+        }
+
+        $selection = new \App\Models\MajorOrganUserSelection();
+        $selection->user_id = (int) $request->user_id;
+        $selection->selection_type = 'package';
+        $selection->package_id = $package->id;
+        $selection->package_title = $package->title;
+        $selection->package_badge = $package->badge;
+        $selection->package_price = $adminPrice;
+        $selection->organ_health_check_count = $summary['organ_health_check_count'];
+        $selection->total_biomarkers = $summary['total_biomarkers'];
+        $selection->selected_organ_tests = $organTests;
+        $selection->selected_biomarkers = array_values(array_unique($biomarkers));
+        $selection->total_amount = $amount;
+        $selection->order_id = $orderId;
+        $selection->status = 2;
+        $selection->payment_status = 0;
+        $selection->save();
+
+        $userPlan = new UserLongevityPlan();
+        $userPlan->user_id = (int) $request->user_id;
+        $userPlan->plan_id = null;
+        if (Schema::hasColumn('user_longevity_plans', 'package_id')) {
+            $userPlan->package_id = $package->id;
+        }
+        $userPlan->order_id = $orderId;
+        $userPlan->amount = $amount;
+        $userPlan->status = 0;
+        $userPlan->save();
+
+        Log::info('Existing lab purchase stored', [
+            'order_id' => $orderId,
+            'user_id' => $request->user_id,
+            'package_id' => $package->id,
+            'user_longevity_plan_id' => $userPlan->id,
+            'major_organ_user_selection_id' => $selection->id,
+        ]);
+
+        return [
+            'user_longevity_plan_id' => (int) $userPlan->id,
+            'major_organ_user_selection_id' => (int) $selection->id,
+        ];
     }
 
     function initiatePaymentLongevity(Request $request)
@@ -2850,6 +2985,19 @@ $message ="{$user->fullname} ({$user->phone_number}) booked with {$doctor->name}
         $selection->status = 1; // 1 = active / purchased selection
         $selection->save();
         Cache::forget('longevity_checkout_selection_' . $orderId);
+
+        $labReportId = Cache::pull('existing_lab_report_order_' . $orderId);
+        if ($labReportId) {
+            $labReport = LabReport::find($labReportId);
+            if ($labReport) {
+                $analysis = is_array($labReport->analysis_response) ? $labReport->analysis_response : [];
+                $analysis['order_id'] = $orderId;
+                $analysis['payment_status'] = 1;
+                $labReport->analysis_response = $analysis;
+                $labReport->status = 1;
+                $labReport->save();
+            }
+        }
 
         Log::info('Longevity payment success: saved MajorOrganUserSelection', [
             'order_id' => $orderId,

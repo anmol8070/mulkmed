@@ -1,6 +1,6 @@
 @extends('include.app')
 @section('header')
-    <script src="{{ asset('asset/script/majorOrganTests.js') }}?v=1.6"></script>
+    <script src="{{ asset('asset/script/majorOrganTests.js') }}?v=1.9"></script>
 @endsection
 
 @section('content')
@@ -88,6 +88,7 @@
         .organ-test-preview-body li {
             margin-bottom: 4px;
         }
+
     </style>
 
     <div class="card mt-3">
@@ -140,6 +141,7 @@
                                         <th>{{ __('Package Title') }}</th>
                                         <th>{{ __('Badge') }}</th>
                                         <th>{{ __('Price') }}</th>
+                                        <th>{{ __('Existing Report Price') }}</th>
                                         <th>{{ __('Included Tests') }}</th>
                                         <th>{{ __('Status') }}</th>
                                         <th>{{ __('Action') }}</th>
@@ -195,6 +197,13 @@
                         <div class="form-group">
                             <label>{{ __('Package Price') }}</label>
                             <input type="number" step="0.01" min="0" id="packagePrice" name="price" class="form-control" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label>{{ __('Existing Lab Report Price') }} <small class="text-muted">({{ __('AED, optional') }})</small></label>
+                            <input type="number" step="0.01" min="0" id="packageExistingReportPrice" name="existing_report_price" class="form-control"
+                                placeholder="e.g. 750">
+                            <small class="text-muted">{{ __('Shown on “Have an existing lab report?”. Empty uses the package price.') }}</small>
                         </div>
 
                         <div class="form-group">

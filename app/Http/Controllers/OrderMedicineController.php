@@ -9,7 +9,7 @@ use Illuminate\Http\Request;
 use App\Models\GlobalFunction;
 use App\Models\GlobalSettings;
 
-include base_path("./app/Class/AgoraDynamicKey/RtcTokenBuilder.php");
+require_once base_path("./app/Class/AgoraDynamicKey/RtcTokenBuilder.php");
 
 class OrderMedicineController extends Controller
 {

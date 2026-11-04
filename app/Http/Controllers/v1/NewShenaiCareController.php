@@ -193,9 +193,10 @@ class NewShenaiCareController extends Controller
             ->get()
             ->map(function ($pkg) use ($currency) {
                 // Counts come from the tests chosen for this package (all active tests when none chosen).
-                $packageTests = $pkg->includedTests();
-                $testCount = $packageTests->count();
-                $biomarkerCount = $packageTests->sum(fn($test) => count(is_array($test->biomarkers) ? $test->biomarkers : []));
+                // $packageTests = $pkg->includedTests();
+                // $testCount = $packageTests->count();
+                // $biomarkerCount = $packageTests->sum(fn($test) => count(is_array($test->biomarkers) ? $test->biomarkers : []));
+                $summary = $pkg->cardSummary();
 
                 return [
                     'id' => $pkg->id,
@@ -206,9 +207,12 @@ class NewShenaiCareController extends Controller
                     'price' => number_format((float) CurrencyHelper::convert($pkg->price, $currency), 2, '.', ''),
                     'image' => !empty($pkg->image) ? ltrim($pkg->image, '/') : null,
                     'status' => (int) $pkg->status,
-                    'organ_health_check_count' => $testCount,
-                    'total_biomarkers' => $biomarkerCount,
-                    'summary' => $testCount . ' Organ Health Check • ' . $biomarkerCount . ' Biomarkers',
+                    // 'organ_health_check_count' => $testCount,
+                    // 'total_biomarkers' => $biomarkerCount,
+                    // 'summary' => $testCount . ' Organ Health Check • ' . $biomarkerCount . ' Biomarkers',
+                    'organ_health_check_count' => $summary['organ_health_check_count'],
+                    'total_biomarkers' => $summary['total_biomarkers'],
+                    'summary' => $summary['summary'],
                 ];
             })->values();
 

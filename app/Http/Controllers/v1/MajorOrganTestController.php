@@ -823,12 +823,13 @@ class MajorOrganTestController extends Controller
             ]);
         }
 
-        $tests = $package->includedTests();
-        $totalBiomarkers = 0;
-        foreach ($tests as $item) {
-            $bms = is_array($item->biomarkers) ? $item->biomarkers : [];
-            $totalBiomarkers += count($bms);
-        }
+        // $tests = $package->includedTests();
+        // $totalBiomarkers = 0;
+        // foreach ($tests as $item) {
+        //     $bms = is_array($item->biomarkers) ? $item->biomarkers : [];
+        //     $totalBiomarkers += count($bms);
+        // }
+        $summary = $package->cardSummary();
 
         return response()->json([
             'status' => true,
@@ -843,9 +844,12 @@ class MajorOrganTestController extends Controller
                 'price' => number_format((float) CurrencyHelper::convert($package->price, $currency), 2, '.', ''),
                 'image' => !empty($package->image) ? GlobalFunction::createMediaUrl($package->image) : null,
                 'status' => (int) $package->status,
-                'organ_health_check_count' => $tests->count(),
-                'total_biomarkers' => $totalBiomarkers,
-                'summary' => $tests->count() . ' Organ Health Check • ' . $totalBiomarkers . ' Biomarkers',
+                // 'organ_health_check_count' => $tests->count(),
+                // 'total_biomarkers' => $totalBiomarkers,
+                // 'summary' => $tests->count() . ' Organ Health Check • ' . $totalBiomarkers . ' Biomarkers',
+                'organ_health_check_count' => $summary['organ_health_check_count'],
+                'total_biomarkers' => $summary['total_biomarkers'],
+                'summary' => $summary['summary'],
             ],
         ]);
     }
@@ -866,12 +870,13 @@ class MajorOrganTestController extends Controller
         }
 
         $tests = $package->includedTests();
+        $summary = $package->cardSummary();
 
-        $totalBiomarkers = 0;
-        $includedHealthChecks = $tests->map(function ($item) use (&$totalBiomarkers) {
+        // $totalBiomarkers = 0;
+        $includedHealthChecks = $tests->map(function ($item) {
             $biomarkers = is_array($item->biomarkers) ? $item->biomarkers : [];
             $biomarkerCount = count($biomarkers);
-            $totalBiomarkers += $biomarkerCount;
+            // $totalBiomarkers += $biomarkerCount;
 
             return [
                 'id' => $item->id,
@@ -896,9 +901,12 @@ class MajorOrganTestController extends Controller
                 'image' => !empty($package->image)
                     ? ltrim($package->image, '/')
                     : null,
-                'organ_health_check_count' => $includedHealthChecks->count(),
-                'total_biomarkers' => $totalBiomarkers,
-                'summary' => $includedHealthChecks->count() . ' Organ Health Check • ' . $totalBiomarkers . ' Biomarkers',
+                // 'organ_health_check_count' => $includedHealthChecks->count(),
+                // 'total_biomarkers' => $totalBiomarkers,
+                // 'summary' => $includedHealthChecks->count() . ' Organ Health Check • ' . $totalBiomarkers . ' Biomarkers',
+                'organ_health_check_count' => $summary['organ_health_check_count'],
+                'total_biomarkers' => $summary['total_biomarkers'],
+                'summary' => $summary['summary'],
                 'included_health_checks' => $includedHealthChecks,
             ],
         ]);
@@ -1171,10 +1179,20 @@ class MajorOrganTestController extends Controller
                 $convertedPrice = number_format((float) CurrencyHelper::convert($combinedTotalAmount, $currency), 2, '.', '');
 
                 $testNames = array_values(array_unique($testNames));
-                if (!empty($testNames)) {
+                $packageForCard = null;
+                if (in_array($first->selection_type, ['package', 'longevity'], true) && !empty($first->package_id)) {
+                    $packageForCard = MajorOrganPackage::find($first->package_id);
+                }
+                if ($packageForCard) {
+                    $card = $packageForCard->cardSummary();
+                    $combinedHealthCheckCount = $card['organ_health_check_count'];
+                    $totalBiomarkers = $card['total_biomarkers'];
+                    $summary = $card['summary'];
+                } elseif (!empty($testNames)) {
                     $summary = implode(' • ', $testNames);
                 } else {
-                    $summary = $combinedHealthCheckCount . ' Organ Health Check • ' . $totalBiomarkers . ' Biomarkers';
+                    // $summary = $combinedHealthCheckCount . ' Organ Health Check • ' . $totalBiomarkers . ' Biomarkers';
+                    $summary = $combinedHealthCheckCount . ' organs • ' . $totalBiomarkers . ' biomarkers';
                 }
 
                 $combinedItem = [
@@ -1231,17 +1249,27 @@ class MajorOrganTestController extends Controller
 
         if ($isPackageSelection) {
             $selectedPackage = !empty($selection->package_id) ? MajorOrganPackage::find($selection->package_id) : null;
-            $allTests = $selectedPackage
-                ? $selectedPackage->includedTests()
-                : \App\Models\MajorOrganTest::where('status', 1)->get();
-            $totalPkgBiomarkersCount = 0;
-            foreach ($allTests as $t) {
-                $bms = is_array($t->biomarkers) ? $t->biomarkers : [];
-                $totalPkgBiomarkersCount += count($bms);
-            }
+            // $allTests = $selectedPackage
+            //     ? $selectedPackage->includedTests()
+            //     : \App\Models\MajorOrganTest::where('status', 1)->get();
+            // $totalPkgBiomarkersCount = 0;
+            // foreach ($allTests as $t) {
+            //     $bms = is_array($t->biomarkers) ? $t->biomarkers : [];
+            //     $totalPkgBiomarkersCount += count($bms);
+            // }
+            //
+            // $organHealthCheckCount = $allTests->count() > 0 ? $allTests->count() : 10;
+            // $totalBiomarkers = $totalPkgBiomarkersCount > 0 ? $totalPkgBiomarkersCount : 41;
 
-            $organHealthCheckCount = $allTests->count() > 0 ? $allTests->count() : 10;
-            $totalBiomarkers = $totalPkgBiomarkersCount > 0 ? $totalPkgBiomarkersCount : 41;
+            $cardSource = $selectedPackage ?: new MajorOrganPackage([
+                'title' => (string) ($selection->package_title ?? ''),
+            ]);
+            $card = $cardSource->cardSummary();
+            $organHealthCheckCount = $card['organ_health_check_count'];
+            $totalBiomarkers = $card['total_biomarkers'];
+            $summaryLine = $card['summary'];
+        } else {
+            $summaryLine = $organHealthCheckCount . ' Organ Health Check • ' . $totalBiomarkers . ' Biomarkers';
         }
 
         $data = [
@@ -1250,7 +1278,8 @@ class MajorOrganTestController extends Controller
             'selection_type' => $selection->selection_type,
             'organ_health_check_count' => $organHealthCheckCount,
             'total_biomarkers' => $totalBiomarkers,
-            'summary' => $organHealthCheckCount . ' Organ Health Check • ' . $totalBiomarkers . ' Biomarkers',
+            // 'summary' => $organHealthCheckCount . ' Organ Health Check • ' . $totalBiomarkers . ' Biomarkers',
+            'summary' => $summaryLine,
             'currency' => $currency,
             'price' => number_format((float) CurrencyHelper::convert($selection->total_amount, $currency), 2, '.', ''),
             'status' => (int) $selection->status,
@@ -1278,7 +1307,8 @@ class MajorOrganTestController extends Controller
                 'selected' => true,
                 'organ_health_check_count' => $organHealthCheckCount,
                 'total_biomarkers' => $totalBiomarkers,
-                'summary' => $organHealthCheckCount . ' Organ Health Check • ' . $totalBiomarkers . ' Biomarkers',
+                // 'summary' => $organHealthCheckCount . ' Organ Health Check • ' . $totalBiomarkers . ' Biomarkers',
+                'summary' => $summaryLine,
             ];
             $data['selected_organ_tests'] = $selectedOrganTests;
             $data['selected_biomarkers'] = $selection->selected_biomarkers ?? [];
@@ -1374,6 +1404,86 @@ class MajorOrganTestController extends Controller
             'total_amount' => $totalAmount,
             'status' => 1,
         ];
+    }
+
+    /**
+     * Existing lab report packages: name, summary, currency, and price only.
+     */
+    public function existingLabPackages(Request $request)
+    {
+        $currency = CurrencyHelper::getUserCurrency();
+        $packages = MajorOrganPackage::where('status', 1)
+            ->orderBy('id', 'asc')
+            ->get()
+            ->map(function ($package) use ($currency) {
+                $card = $this->existingLabReportPackageCard($package, $currency);
+
+                return [
+                    'id' => $card['id'],
+                    'name' => $card['name'],
+                    'summary' => $card['description'],
+                    'currency' => $card['currency'],
+                    'price' => $card['price'],
+                ];
+            })
+            ->values();
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Existing lab packages fetched successfully',
+            'currency' => $currency,
+            'data' => $packages,
+        ]);
+    }
+
+    /**
+     * One package card: Comprehensive (recommended, full report) or Basic.
+     */
+    private function existingLabReportPackageCard(MajorOrganPackage $package, string $currency): array
+    {
+        $summary = $package->cardSummary();
+        $biomarkers = (int) $summary['total_biomarkers'];
+        $title = (string) $package->title;
+        $isComprehensive = stripos($title, 'comprehensive') !== false;
+        $isBasic = stripos($title, 'basic') !== false;
+        $recommended = $isComprehensive || stripos((string) $package->badge, 'recommend') !== false;
+        $adminPrice = $package->existingReportPrice();
+        $price = $this->priceFromAdmin($adminPrice, $currency);
+        $priceFormatted = number_format($price, 2, '.', '');
+        $priceShown = abs($price - round($price)) < 0.001
+            ? (string) (int) round($price)
+            : $priceFormatted;
+
+        return [
+            'id' => $package->id,
+            'name' => $isComprehensive ? 'Comprehensive' : ($isBasic ? 'Basic' : $title),
+            'title' => $title,
+            'recommended' => $recommended,
+            'badge' => $recommended ? 'Recommended' : ($package->badge ?: null),
+            'description' => $isComprehensive
+                ? $biomarkers . ' biomarkers analysed, full report'
+                : $biomarkers . ' biomarkers analysed',
+            'biomarker_count' => $biomarkers,
+            'organ_health_check_count' => $summary['organ_health_check_count'],
+            'currency' => $currency,
+            'admin_price' => number_format($adminPrice, 2, '.', ''),
+            'price' => $priceFormatted,
+            'price_label' => $currency . ' ' . $priceShown,
+        ];
+    }
+
+    /**
+     * Package price saved in admin (AED), converted when the user currency is not AED.
+     */
+    private function priceFromAdmin(float $adminPrice, string $currency): float
+    {
+        if ($currency === 'AED' || $adminPrice <= 0) {
+            return $adminPrice;
+        }
+
+        $converted = (float) CurrencyHelper::convert($adminPrice, $currency);
+
+        return $converted > 0 ? $converted : $adminPrice;
     }
 
     public function analyzeNative(Request $request, \App\Services\LabReportBiomarkerAnalyzerService $service)
