@@ -37,6 +37,9 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Hash;
 use Stichoza\GoogleTranslate\GoogleTranslate;
+use App\Helpers\TranslationHelper;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
 use DB;
 
 class DoctorController extends Controller
@@ -1003,7 +1006,7 @@ class DoctorController extends Controller
     }
 
     function fetchDoctorPlansAndSlots(Request $request)
-    {
+    {   
         $allowedSlotOrder = [
             '06:00', '06:30', '07:00', '07:30', '08:00', '08:30', '09:00', '09:30',
             '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30',
@@ -1059,7 +1062,7 @@ class DoctorController extends Controller
         $buildWeekdaySlots = function (int $weekday) use ($allFormattedSlots, $allowedSlotLookup) {
             $daySlots = array_values(array_filter($allFormattedSlots, function ($slot) use ($weekday, $allowedSlotLookup) {
                 return (int) $slot['weekday'] === $weekday && isset($allowedSlotLookup[$slot['time']]);
-        }));
+            }));
 
             usort($daySlots, function ($a, $b) use ($allowedSlotLookup) {
                 return $allowedSlotLookup[$a['time']] <=> $allowedSlotLookup[$b['time']];
@@ -1186,17 +1189,19 @@ class DoctorController extends Controller
             ->orderByRaw("CAST(LPAD(REPLACE(time, ':', ''), 4, '0') AS UNSIGNED) ASC")
             ->get();
 
-        $bookingDate = GlobalFunction::normalizeDateToYmd($request->date) ?? $request->date;
-        $bookedSlotTimes = GlobalFunction::getActiveBookedSlotTimesForDoctorDate($request->doctor_id, $bookingDate);
         $slots = [];
-        foreach ($doctor_slots as $slot) {
-            if (GlobalFunction::isDoctorSlotOverlappingAppointment($slot->time, $bookedSlotTimes)) {
-                continue;
-            }
-
+        foreach ($doctor_slots as $key => $slot) {
             $slot->is_booked = 0;
+            $isBooked = Appointments::where('doctor_id', $request->doctor_id)
+                ->where('date', $request->date)
+                ->where('time', $slot->time)
+                ->get();
+            if (count($isBooked) > 0) {
+                $slot->is_booked = 1;
+            } else {
                 $slot->time = GlobalFunction::formateTimeString($slot->time);
-            $slots[] = $slot;
+                array_push($slots, $slot);
+            }
         }
         $slots = array_values(array_filter($slots, function ($slot) use ($allowedSlotPosition, $normalizeSlotTime) {
             $normalized = $normalizeSlotTime($slot->time);
@@ -3620,6 +3625,27 @@ class DoctorController extends Controller
 
     function doctorLogin(Request $request)
     {
+        $validator = Validator::make($request->all(), [
+            'identity' => 'required',
+            'password' => 'required|string|min:8',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['status' => false, 'message' => $validator->errors()->first()], 422);
+        }
+
+        $throttleKey = Str::transliterate(Str::lower($request->input('identity')) . '|' . $request->ip());
+
+        if (RateLimiter::tooManyAttempts($throttleKey, 3)) {
+            $seconds = RateLimiter::availableIn($throttleKey);
+            $minutes = ceil($seconds / 60);
+            return response()->json([
+                'status' => false,
+                'message' => "Too many failed login attempts. Your account is temporarily locked for {$minutes} minute(s). Please try again later.",
+                'retry_after_seconds' => $seconds
+            ], 429);
+        }
+
         $hostAndConversionRate = Helpers::conversionRate();
         $conversionRate = (float) $hostAndConversionRate['conversionRate'];
         $doctor = Doctors::select('doctors.*',DB::raw("ROUND(consultation_fee * {$conversionRate}) as consultation_fee"))
@@ -3629,13 +3655,19 @@ class DoctorController extends Controller
                 $doctor = Doctors::select('doctors.*',DB::raw("ROUND(consultation_fee * {$conversionRate}) as consultation_fee"))
                             ->where('status', 1)->where('identity', $request->identity)->where('password', $request->password)->first();
                 if ($doctor) {
+                    RateLimiter::clear($throttleKey);
                     // $token  = $doctor->createToken('auth_token')->plainTextToken;
                     // $doctor->app_version  = $request->app_version;
                     // $doctor->device_details  = $request->device_details;
                     // $doctor->save();
                     return response()->json(['status' => true, 'data' => $doctor]);
                 } else {
-                    return response()->json(['message' => 'Invalid credentials'], 200);
+                    RateLimiter::hit($throttleKey, 15 * 60);
+                    $remainingAttempts = RateLimiter::remaining($throttleKey, 5);
+                    return response()->json([
+                        'message' => 'Invalid credentials',
+                        'remaining_attempts' => $remainingAttempts
+                    ], 401);
                 }
             } else {
                 return response()->json(['status' => false, 'message' => "Doctor is not approved. Please contact with administration department"]);

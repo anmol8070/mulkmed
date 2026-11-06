@@ -50,12 +50,15 @@ use App\Models\UserCoupons;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use App\Mail\AiVitalReportMail;
 use App\Services\SenoclockAiService;
 use Carbon\Carbon;
 use App\Mail\AiVitalMesaReportMail;
 use PDF;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
 use DB;
 
 class UsersController extends Controller
@@ -2390,12 +2393,34 @@ Team Mulk Med.";
 
     function loginUser(Request $request)
     {
+        $validator = Validator::make($request->all(), [
+            'username' => 'required',
+            'password' => 'required',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['status' => false, 'message' => $validator->errors()->first()], 422);
+        }
+
+        $throttleKey = Str::transliterate(Str::lower($request->input('username')) . '|' . $request->ip());
+
+        if (RateLimiter::tooManyAttempts($throttleKey, 3)) {
+            $seconds = RateLimiter::availableIn($throttleKey);
+            $minutes = ceil($seconds / 60);
+            return response()->json([
+                'status' => false,
+                'message' => "Too many failed login attempts. Your account is temporarily locked for {$minutes} minute(s). Please try again later.",
+                'retry_after_seconds' => $seconds
+            ], 429);
+        }
+
         $user = User::where('username',$request->username)->first();
         if($user)
         {
             $user = User::where('username',$request->username)->where('password',$request->password)->first();
             if($user)
             {
+                RateLimiter::clear($throttleKey);
                 $token  = $user->createToken('auth_token')->plainTextToken;
                 $user->app_version      = $request->app_version;
                 $user->device_details   = $request->device_details;
@@ -2404,7 +2429,12 @@ Team Mulk Med.";
                 return response()->json(['status' => true,'token' => $token , 'user' => $user]);
             }
             else{
-                return response()->json(['message' => 'Invalid credentials'], 401);
+                RateLimiter::hit($throttleKey, 15 * 60);
+                $remainingAttempts = RateLimiter::remaining($throttleKey, 5);
+                return response()->json([
+                    'message' => 'Invalid credentials',
+                    'remaining_attempts' => $remainingAttempts
+                ], 401);
             }
         }else{
             return response()->json(['status' => false, 'message' => "user does not exist"]);
@@ -2482,7 +2512,7 @@ Team Mulk Med.";
         if (!empty($userId)) {
             // A plan is bought when major_organ_user_selections has a paid plan purchase
             // (unpaid checkouts have payment_status 0). Both lab report banners show after
-            // that purchase. Once a report uploaded on or after it is generated, only banner 147 stays.
+            // that purchase. Once a report uploaded on or after it is generated, the section is omitted.
             $paidPlan = MajorOrganUserSelection::where('user_id', $userId)
                 ->whereIn('selection_type', ['longevity', 'package'])
                 ->where('payment_status', 1)
@@ -2494,7 +2524,7 @@ Team Mulk Med.";
                     ->where('created_at', '>=', $paidPlan->created_at)
                     ->where('senoclock_status', 'completed')
                     ->whereNotNull('senoclock_pdf_path')
-                    ->exists();
+                ->exists();
             }
         }
 
@@ -2504,20 +2534,20 @@ Team Mulk Med.";
         {
             $searchLang = request()->header('lang', 'en');
             $searchColumndesignation = match ($searchLang) {
-                'ar' => 'ar_designation',
-                'fr' => 'fr_designation',
-                'hi' => 'hi_designation',
-                'ur' => 'ur_designation',
-                default => 'designation',
-            };
+                        'ar' => 'ar_designation',
+                        'fr' => 'fr_designation',
+                        'hi' => 'hi_designation',
+                        'ur' => 'ur_designation',
+                        default => 'designation',
+                    };
             $searchColumnlanguagesSpoken = match ($searchLang) {
-                'ar' => 'ar_languages_spoken',
-                'fr' => 'fr_languages_spoken',
-                'hi' => 'hi_languages_spoken',
-                'ur' => 'ur_languages_spoken',
-                default => 'languages_spoken',
-            };
-            $search = strtolower(trim($request->search));
+                        'ar' => 'ar_languages_spoken',
+                        'fr' => 'fr_languages_spoken',
+                        'hi' => 'hi_languages_spoken',
+                        'ur' => 'ur_languages_spoken',
+                        default => 'languages_spoken',
+                    };
+                    $search = strtolower(trim($request->search));
 
             foreach ($sections as $key => $sequence) {
                 if($sequence->section_type == 'doctors_section')
@@ -2527,7 +2557,7 @@ Team Mulk Med.";
                     $columnlanguages_spoken = $searchColumnlanguagesSpoken;
 
                     $section = Doctors::select('doctors.*', DB::raw("$columndesignation as designation"), DB::raw("$columnlanguages_spoken as languages_spoken"),
-                                    DB::raw("ROUND(consultation_fee * {$conversionRate}) as consultation_fee"))
+                                        DB::raw("ROUND(consultation_fee * {$conversionRate}) as consultation_fee"))
                                 ->with('expertise')
                                 ->where('status', Constants::statusDoctorApproved)
                                 ->where('on_vacation', Constants::doctorNotOnVacation)
@@ -2538,8 +2568,8 @@ Team Mulk Med.";
                                         ->where('doctor_cats.is_deleted', 0);
                                 })
                                 ->where(function($query) use ($search) {
-                                    $query->whereRaw('LOWER(doctors.name) LIKE ?', ["%{$search}%"])
-                                        ->orWhereRaw('LOWER(doctors.designation) LIKE ?', ["%{$search}%"])
+                                        $query->whereRaw('LOWER(doctors.name) LIKE ?', ["%{$search}%"])
+                                            ->orWhereRaw('LOWER(doctors.designation) LIKE ?', ["%{$search}%"])
                                         ->orWhereExists(function ($subQuery) use ($search) {
                                             $subQuery->select(DB::raw(1))
                                                 ->from('doctor_cats')
@@ -2556,7 +2586,7 @@ Team Mulk Med.";
                                                 ->whereColumn('doctor_expertise.doctor_id', 'doctors.id')
                                                 ->whereRaw('LOWER(doctor_expertise.title) LIKE ?', ["%{$search}%"]);
                                         });
-                                })
+                                    })
                                 ->orderBy('is_online', 'DESC')
                                 ->get();
                     
@@ -2811,7 +2841,7 @@ Team Mulk Med.";
         // Temporarily hide every dashboard card except longevity, common health problems
         // and Mulk Med virtual hospital doctors. Mulk AI Wellness Health Check is hidden for now.
         // Remove this filter to show all cards again.
-        $visibleSectionTypes = [/* 'mulk_ai_vitals', */ 'mulk_longevity_lab_report', 'mulk_longevity_care', 'common_health_problems', 'mulk_med_virtual_hospital_doctors'];
+        $visibleSectionTypes = [/* 'mulk_ai_vitals', */ 'mulk_longevity_lab_report', 'mulk_longevity_care', /* 'second_medical_openion', */ 'common_health_problems', 'mulk_med_virtual_hospital_doctors', 'doctors_section'];
         $sections = $sections->filter(
             fn($section) => in_array(strtolower((string) $section->section_type), $visibleSectionTypes, true)
         )->values();
@@ -2947,16 +2977,16 @@ Team Mulk Med.";
                 }
             }
 
-            // Mulk Longevity Lab Report: both banners after purchase; only id 147 after the report is generated.
+            // Mulk Longevity Lab Report: both banners after purchase. Hide the section after one generated report.
             if($sequence->section_type == 'mulk_longevity_lab_report')
             {
-                if ($hasBoughtLongevityPlan) {
+                if ($hasBoughtLongevityPlan && !$hasUploadedLabReport) {
                     $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
-                                    ->where('is_deleted', 0)
-                                    ->when($hasUploadedLabReport, fn ($query) => $query->where('id', 147))
-                                    ->get();
+                                ->where('is_deleted', 0)
+                                ->get();
                     if($labReportSection->isNotEmpty())
                     {
+                        $sequence->section_name = 'Mulk Med Longevity Hub Report';
                         $sequence->section_data = $labReportSection;
                         array_push($sectionSequence, $sequence);
                     }
@@ -2964,7 +2994,7 @@ Team Mulk Med.";
             }
 
             if($sequence->section_type == 'Mulk_Longevity_Care' || $sequence->section_type == 'mulk_longevity_care')
-            {
+                {
                 $section = DashboardBanners::where('name', 'Mulk Longevity Care')
                                 ->where('is_deleted', 0)
                                 ->get();
@@ -2975,22 +3005,25 @@ Team Mulk Med.";
                 }
                 if($section->isNotEmpty())
                 {
+                    $sequence->section_name = 'Mulk Med Longevity Hub';
+                    $section->each(function ($banner) {
+                        $banner->name = str_replace('Care', 'Hub', (string) $banner->name) ?: 'Mulk Med Longevity Hub';
+                    });
                     $sequence->section_data = $section;
                     array_push($sectionSequence,$sequence);
                 }
 
-                // Separate section for Mulk Longevity Lab Report (both banners after purchase; only id 147 after the report is generated)
-                if ($hasBoughtLongevityPlan && !$sections->contains('section_type', 'mulk_longevity_lab_report'))
+                // Separate section for Mulk Longevity Lab Report (both banners after purchase; hidden after one generated report)
+                if ($hasBoughtLongevityPlan && !$hasUploadedLabReport && !$sections->contains('section_type', 'mulk_longevity_lab_report'))
                 {
                 $labReportSection = DashboardBanners::where('name', 'Mulk Longevity Lab Report')
                                 ->where('is_deleted', 0)
-                                ->when($hasUploadedLabReport, fn ($query) => $query->where('id', 147))
                                 ->get();
                 if($labReportSection->isNotEmpty())
                 {
                     $labSequence = clone $sequence;
                     $labSequence->id = $sequence->id + 1000; // Give it a unique pseudo ID
-                    $labSequence->section_name = 'Mulk Longevity Lab Report';
+                    $labSequence->section_name = 'Mulk Med Longevity Hub Report';
                     $labSequence->section_type = 'mulk_longevity_lab_report';
                     $labSequence->section_data = $labReportSection;
                     array_push($sectionSequence, $labSequence);
@@ -2998,17 +3031,18 @@ Team Mulk Med.";
                 }
             }
 
-            if($sequence->section_type == "second_medical_openion")
-            {
-                $section = DashboardBanners::where('name', 'Second Medical Opinion (SMO)')
-                                ->where('is_deleted', 0)
-                                ->get();
-                if($section != [])
-                {
-                    $sequence->section_data = $section;
-                    array_push($sectionSequence,$sequence);
-                }
-            }
+            // if($sequence->section_type == "second_medical_openion")
+            // {
+            //     $section = DashboardBanners::where('name', 'Second Medical Opinion (SMO)')
+            //                     ->where('is_deleted', 0)
+            //                     ->get();
+            //     if($section != [])
+            //     {
+            //         $sequence->section_name = 'Worldwide Best Treatments Finder';
+            //         $sequence->section_data = $section;
+            //         array_push($sectionSequence,$sequence);
+            //     }
+            // }
 
             if($sequence->section_type == "common_health_problems")
             {
@@ -3389,54 +3423,52 @@ Team Mulk Med.";
             }
         }
 
-        // Appointments are hidden from the appointment banner for now.
-        // if ($request->has('user_id')) {
-        //     $appointments = Appointments::where('user_id', $request->user_id)
-        //         ->where('status', Constants::orderAccepted)
-        //         ->orderBy('date', 'asc')
-        //         ->orderBy('time', 'asc')
-        //         ->get();
-        //
-        //     if ($appointments->count()) {
-        //         $appointmentsWithJitsi = [];
-        //
-        //         foreach ($appointments as $appointment) {
-        //             $jitsi_meeting = JitsiMeeting::where('appointment_id', $appointment->id)->first();
-        //             if ($jitsi_meeting) {
-        //                 $appointment->jitsi_link = url("/api/v1/join_jitsi_meeting?user_id={$appointment->user_id}&room={$jitsi_meeting->room}");;
-        //                 $appointment->image = asset('storage/uploads/dashboard_appointment_banner.png');
-        //                 $appointmentsWithJitsi[] = $appointment;
-        //             }
-        //
-        //             $vital_scan = AI_Vital::where('user_id',$request->user_id)->where('appointment_id',$appointment->id)->get();
-        //             $isVitalScanDone = 0;
-        //
-        //             if(count($vital_scan)){
-        //                 $isVitalScanDone = 1;
-        //             }
-        //             $appointment->is_vital_scan_done = $isVitalScanDone;
-        //         }
-        //
-        //         if (count($appointmentsWithJitsi)) {
-        //             $appointmentBanner = new \stdClass();
-        //             $appointmentBanner->id = 2;
-        //             $appointmentBanner->section_name = "appointment_banner";
-        //             $appointmentBanner->section_type = "appointment_banner";
-        //             $appointmentBanner->section_data = $appointmentsWithJitsi;
-        //
-        //             array_splice($sectionSequence, 1, 0, [$appointmentBanner]);
-        //
-        //             foreach ($sectionSequence as $index => $sec) {
-        //                 $sec->id = $index + 1;
-        //             }
-        //         }
-        //     }
-        //
-        // }
+        if ($request->has('user_id')) {
+            $appointments = Appointments::where('user_id', $request->user_id)
+                ->where('status', Constants::orderAccepted)
+                ->orderBy('date', 'asc')
+                ->orderBy('time', 'asc')
+                ->get();
 
-        // Show the Mulk Longevity Care and Mulk Longevity Lab Report cards in the appointment
-        // banner's spot (from the second position), keeping their own section_type so the app
-        // renders them as banner cards.
+            if ($appointments->count()) {
+                $appointmentsWithJitsi = [];
+
+                foreach ($appointments as $appointment) {
+                    $jitsi_meeting = JitsiMeeting::where('appointment_id', $appointment->id)->first();
+                    if ($jitsi_meeting) {
+                        $appointment->jitsi_link = url("/api/v1/join_jitsi_meeting?user_id={$appointment->user_id}&room={$jitsi_meeting->room}");
+                        $appointment->image = asset('storage/uploads/dashboard_appointment_banner.png');
+                        $appointmentsWithJitsi[] = $appointment;
+                    }
+
+                    $vital_scan = AI_Vital::where('user_id',$request->user_id)->where('appointment_id',$appointment->id)->get();
+                    $isVitalScanDone = 0;
+
+                    if(count($vital_scan)){
+                        $isVitalScanDone = 1;
+                    }
+                    $appointment->is_vital_scan_done = $isVitalScanDone;
+                }
+
+                if (count($appointmentsWithJitsi)) {
+                    $appointmentBanner = new \stdClass();
+                    $appointmentBanner->id = 1;
+                    $appointmentBanner->section_name = "appointment_banner";
+                    $appointmentBanner->section_type = "appointment_banner";
+                    $appointmentBanner->section_data = $appointmentsWithJitsi;
+
+                    // Appointment display 1st
+                    array_unshift($sectionSequence, $appointmentBanner);
+
+                    foreach ($sectionSequence as $index => $sec) {
+                        $sec->id = $index + 1;
+                    }
+                }
+            }
+
+        }
+
+        // Show the Mulk Longevity Care and Mulk Longevity Lab Report cards immediately after the appointment banner
         $longevityCards = [];
         // Lab Report card first (only present for users who bought a plan), then Longevity Care.
         foreach (['mulk_longevity_lab_report', 'mulk_longevity_care'] as $longevityType) {
@@ -3449,8 +3481,38 @@ Team Mulk Med.";
             }
         }
         if (!empty($longevityCards)) {
-            array_splice($sectionSequence, min(1, count($sectionSequence)), 0, $longevityCards);
+            // Find appointment banner position; if present, insert directly after it
+            $appointmentIndex = null;
+            foreach ($sectionSequence as $index => $sec) {
+                if (strtolower((string) $sec->section_type) === 'appointment_banner') {
+                    $appointmentIndex = $index;
+                    break;
+                }
+            }
+
+            $insertLongevityAt = ($appointmentIndex !== null) ? ($appointmentIndex + 1) : 0;
+            array_splice($sectionSequence, $insertLongevityAt, 0, $longevityCards);
         }
+
+        // Worldwide Best Treatments Finder sits immediately before Common Health Problems.
+        // $treatmentsFinder = null;
+        // foreach ($sectionSequence as $index => $sec) {
+        //     if (strtolower((string) $sec->section_type) === 'second_medical_openion') {
+        //         $treatmentsFinder = $sec;
+        //         array_splice($sectionSequence, $index, 1);
+        //         break;
+        //     }
+        // }
+        // if ($treatmentsFinder) {
+        //     $insertAt = count($sectionSequence);
+        //     foreach ($sectionSequence as $index => $sec) {
+        //         if (strtolower((string) $sec->section_type) === 'common_health_problems') {
+        //             $insertAt = $index;
+        //             break;
+        //         }
+        //     }
+        //     array_splice($sectionSequence, $insertAt, 0, [$treatmentsFinder]);
+        // }
 
         // Mulk Med Virtual Hospital Doctors sits below the dashboard cards.
         $virtualHospitalDoctors = [];
@@ -3464,6 +3526,18 @@ Team Mulk Med.";
         if (!empty($virtualHospitalDoctors)) {
             array_push($sectionSequence, ...$virtualHospitalDoctors);
         }
+
+        $globalDoctorSections = [];
+                    foreach ($sectionSequence as $index => $sec) {
+            if (strtolower((string) $sec->section_type) === 'doctors_section') {
+                $globalDoctorSections[] = $sec;
+                array_splice($sectionSequence, $index, 1);
+                break;
+                    }
+                }
+        if (!empty($globalDoctorSections)) {
+            array_push($sectionSequence, ...$globalDoctorSections);
+            }
 
         foreach ($sectionSequence as $index => $sec) {
             $sec->id = $index + 1;

@@ -17,6 +17,7 @@ use App\Models\DoctorHolidays;
 use App\Models\DoctorNotifications;
 use App\Models\DoctorPayoutHistory;
 use App\Models\DoctorReviews;
+use App\Models\Doctor;
 use App\Models\Doctors;
 use App\Models\DoctorServiceLocations;
 use App\Models\DoctorServices;
@@ -32,6 +33,8 @@ use Illuminate\Http\Request;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
 
 class DoctorController extends Controller
 {
@@ -2847,6 +2850,27 @@ class DoctorController extends Controller
 
     function doctorLogin(Request $request)
     {
+        $validator = Validator::make($request->all(), [
+            'identity' => 'required',
+            'password' => 'required',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['status' => false, 'message' => $validator->errors()->first()], 422);
+        }
+
+        $throttleKey = Str::transliterate(Str::lower($request->input('identity')) . '|' . $request->ip());
+
+        if (RateLimiter::tooManyAttempts($throttleKey, 3)) {
+            $seconds = RateLimiter::availableIn($throttleKey);
+            $minutes = ceil($seconds / 60);
+            return response()->json([
+                'status' => false,
+                'message' => "Too many failed login attempts. Your account is temporarily locked for {$minutes} minute(s). Please try again later.",
+                'retry_after_seconds' => $seconds
+            ], 429);
+        }
+
         $doctor = Doctors::where('identity', $request->identity)->first();
         if($doctor)
         {
@@ -2854,6 +2878,7 @@ class DoctorController extends Controller
                 $doctor = Doctors::where('status',1)->where('identity', $request->identity)->where('password',$request->password)->first();
                 if($doctor)
                 {
+                    RateLimiter::clear($throttleKey);
                     // $token  = $doctor->createToken('auth_token')->plainTextToken;
                     // $doctor->app_version  = $request->app_version;
                     // $doctor->device_details  = $request->device_details;
@@ -2861,7 +2886,12 @@ class DoctorController extends Controller
                     return response()->json(['status' => true, 'data' => $doctor]);
                 }
                 else{
-                    return response()->json(['message' => 'Invalid credentials'], 401);
+                    RateLimiter::hit($throttleKey, 15 * 60);
+                    $remainingAttempts = RateLimiter::remaining($throttleKey, 5);
+                    return response()->json([
+                        'message' => 'Invalid credentials',
+                        'remaining_attempts' => $remainingAttempts
+                    ], 401);
                 }
             }else{
                 return response()->json(['status' => false, 'message' => "Doctor is not approved. Please contact with administration department"]);
