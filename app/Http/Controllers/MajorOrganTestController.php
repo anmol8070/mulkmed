@@ -24,9 +24,12 @@ class MajorOrganTestController extends Controller
                 'badge' => $package->badge,
                 'description' => $package->description,
                 'price' => number_format((float) $package->price, 2, '.', ''),
+                'existing_report_price' => $package->existing_report_price !== null && $package->existing_report_price !== ''
+                    ? number_format((float) $package->existing_report_price, 2, '.', '')
+                    : '',
                 'image' => !empty($package->image) ? GlobalFunction::createMediaUrl($package->image) : null,
                 'status' => (int) $package->status,
-            'test_ids' => $testIds,
+                'test_ids' => $testIds,
             'includes_all_tests' => empty($testIds),
             'tests' => $package->includedTests()->map(fn($test) => [
                 'id' => $test->id,
@@ -85,6 +88,9 @@ class MajorOrganTestController extends Controller
         $package->badge = $request->badge;
         $package->description = $request->description;
         $package->price = $request->price;
+        $package->existing_report_price = $request->filled('existing_report_price')
+            ? $request->existing_report_price
+            : null;
         $package->status = (int) $request->status;
 
         // Chosen organ tests; none chosen means the package includes every active test.

@@ -261,6 +261,7 @@ $(document).ready(function () {
             $("#packageBadge").val("");
             $("#packageDescription").val("");
             $("#packagePrice").val("");
+            $("#packageExistingReportPrice").val("");
             $("#packageStatus").val("1");
             $("#packagePreviewImage").attr("src", placeholderIcon);
             $("#packageFormTitle").text("Add Package");
@@ -272,6 +273,7 @@ $(document).ready(function () {
         $("#packageBadge").val(data.badge || "");
         $("#packageDescription").val(data.description || "");
         $("#packagePrice").val(data.price || "");
+        $("#packageExistingReportPrice").val(data.existing_report_price || "");
         $("#packageStatus").val(String(data.status ?? 1));
         $("#packagePreviewImage").attr("src", data.image || placeholderIcon);
         $("#packageFormTitle").text("Edit Package");
@@ -286,7 +288,7 @@ $(document).ready(function () {
         const $tbody = $("#packagesTable tbody").empty();
 
         if (!packages.length) {
-            $tbody.append('<tr><td colspan="7" class="text-center text-muted">No packages yet</td></tr>');
+            $tbody.append('<tr><td colspan="8" class="text-center text-muted">No packages yet</td></tr>');
             return;
         }
 
@@ -313,6 +315,7 @@ $(document).ready(function () {
                 <td>${escapeHtml(item.title)}</td>
                 <td>${escapeHtml(item.badge)}</td>
                 <td>${escapeHtml(item.price)}</td>
+                <td>${escapeHtml(item.existing_report_price || "—")}</td>
                 <td>${testsCol}</td>
                 <td>${status}</td>
                 <td>${actions}</td>

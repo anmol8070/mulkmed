@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\SenoclockAiService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -16,6 +17,7 @@ class MajorOrganPackage extends Model
         'badge',
         'description',
         'price',
+        'existing_report_price',
         'image',
         'test_ids',
         'status',
@@ -24,6 +26,7 @@ class MajorOrganPackage extends Model
     protected $casts = [
         'status' => 'integer',
         'price' => 'decimal:2',
+        'existing_report_price' => 'decimal:2',
         'test_ids' => 'array',
     ];
 
@@ -43,5 +46,46 @@ class MajorOrganPackage extends Model
         }
 
         return $query->get();
+    }
+
+    /**
+     * Plan-card counts from the longevity design: both plans cover 12 organs.
+     * Comprehensive lists every SenoClock biomarker; Basic lists the required set.
+     *
+     * @return array{organ_health_check_count: int, total_biomarkers: int, summary: string}
+     */
+    public function cardSummary(): array
+    {
+        $title = (string) $this->title;
+        $organs = 12;
+
+        if (stripos($title, 'comprehensive') !== false) {
+            $biomarkers = count(SenoclockAiService::ALL_SENOCLOCK_BIOMARKER_NAMES);
+        } elseif (stripos($title, 'basic') !== false) {
+            $biomarkers = count(SenoclockAiService::REQUIRED_SENOCLOCK_BIOMARKERS);
+        } else {
+            $tests = $this->includedTests();
+            $organs = $tests->count();
+            $biomarkers = (int) $tests->sum(fn ($test) => count(is_array($test->biomarkers) ? $test->biomarkers : []));
+        }
+
+        return [
+            'organ_health_check_count' => $organs,
+            'total_biomarkers' => $biomarkers,
+            'summary' => $organs . ' organs • ' . $biomarkers . ' biomarkers',
+        ];
+    }
+
+    /**
+     * Price for "Have an existing lab report?". Uses the admin existing-report price
+     * when it is set, otherwise the package price.
+     */
+    public function existingReportPrice(): float
+    {
+        if ($this->existing_report_price !== null && $this->existing_report_price !== '') {
+            return (float) $this->existing_report_price;
+        }
+
+        return (float) $this->price;
     }
 }

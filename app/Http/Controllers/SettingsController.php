@@ -51,7 +51,7 @@ use Rap2hpoutre\FastExcel\FastExcel;
 use Stichoza\GoogleTranslate\GoogleTranslate;
 
 
-include base_path("./app/Class/AgoraDynamicKey/RtcTokenBuilder.php");
+require_once base_path("./app/Class/AgoraDynamicKey/RtcTokenBuilder.php");
 
 class SettingsController extends Controller
 {

@@ -159,6 +159,7 @@ use App\Http\Controllers\v1\PatientEmrReportController;
 
         // Longevity Plan Payment
         Route::post('/ccavenue/initiate-longevity', [CcavenueController::class, 'initiatePaymentLongevity']);
+        Route::post('/ccavenue/existing-lab', [CcavenueController::class, 'initiatePaymentExistingLabReport']);
 
         // Notification
         Route::post('fetchNotification', [UsersController::class, 'fetchNotification'])->middleware('checkHeader');
@@ -335,11 +336,13 @@ use App\Http\Controllers\v1\PatientEmrReportController;
     Route::prefix('majorOrganTests')->name('.majorOrganTests')->group(function () {
         Route::get('list', [MajorOrganTestController::class, 'list'])->middleware('checkHeader')->name('list');
         Route::get('planDetails', [MajorOrganTestController::class, 'planDetails'])->middleware('checkHeader')->name('planDetails');
+        Route::get('existingLabpackages', [MajorOrganTestController::class, 'existingLabPackages'])->middleware('checkHeader')->name('existingLabpackages');
         Route::post('analyzeReport', [MajorOrganTestController::class, 'analyzeReport'])->middleware('checkHeader')->name('analyzeReport');
         Route::post('generateSenoclockReport', [MajorOrganTestController::class, 'generateSenoclockReport'])->middleware('checkHeader')->name('generateSenoclockReport');
         Route::post('saveSelection', [MajorOrganTestController::class, 'saveSelection'])->middleware('checkHeader')->name('saveSelection');
         Route::get('getSelection', [MajorOrganTestController::class, 'getSelection'])->middleware('checkHeader')->name('getSelection');
         Route::get('downloadSenoclockReport/{id}', [MajorOrganTestController::class, 'downloadSenoclockReport'])->name('downloadSenoclockReport');
+        Route::get('homeSampleCollection/fastingInstructions', [HomeSampleCollectionController::class, 'fastingInstructions'])->middleware('checkHeader')->name('homeSampleCollection.fastingInstructions');
         Route::get('homeSampleCollection/options', [HomeSampleCollectionController::class, 'options'])->middleware('checkHeader')->name('homeSampleCollection.options');
         Route::post('homeSampleCollection/save', [HomeSampleCollectionController::class, 'save'])->middleware('checkHeader')->name('homeSampleCollection.save');
         Route::get('homeSampleCollection/list', [HomeSampleCollectionController::class, 'list'])->middleware('checkHeader')->name('homeSampleCollection.list');
