@@ -752,29 +752,99 @@ class GlobalFunction extends Model
         }
     }
     
-    //   public static function jitsiBothParticipantsJoined($meeting): bool
-    // {
-    //     if ($meeting === null) {
-    //         return false;
-    //     }
+    public static function getAppointmentGraceEndTime($date, $time, int $graceMinutes = 90): ?Carbon
+    {
+        $normalizedTime = self::normalizeTimeToHis($time);
+        if (empty($date) || empty($normalizedTime)) {
+            return null;
+        }
 
-    //     return (int) ($meeting->user_joined ?? 0) === 1
-    //         && (int) ($meeting->doctor_joined ?? 0) === 1;
-    // }
+        try {
+            $timezone = config('app.business_timezone', 'UTC');
 
-    // public static function jitsiEitherParticipantMissing($meeting): bool
-    // {
-    //     if ($meeting === null) {
-    //         return true;
-    //     }
+            return Carbon::parse("{$date} {$normalizedTime}", $timezone)->addMinutes($graceMinutes);
+        } catch (\Throwable $th) {
+            Log::warning('getAppointmentGraceEndTime failed', [
+                'date' => $date,
+                'time' => $time,
+                'error' => $th->getMessage(),
+            ]);
 
-    //     return (int) ($meeting->user_joined ?? 0) !== 1
-    //         || (int) ($meeting->doctor_joined ?? 0) !== 1;
-    // }
+            return null;
+        }
+    }
+
+    public static function isAppointmentPastGracePeriod($date, $time, int $graceMinutes = 90): bool
+    {
+        $graceEnd = self::getAppointmentGraceEndTime($date, $time, $graceMinutes);
+        if ($graceEnd === null) {
+            return false;
+        }
+
+        $now = Carbon::now(config('app.business_timezone', 'UTC'));
+
+        return $graceEnd->lt($now);
+    }
+
+    /**
+     * Resolve pending/accepted appointments that are past the consultation window.
+     * Persists missed status so list tabs stay in sync with the mobile app filters.
+     */
+    public static function resolveStaleAppointmentStatus($appointment, $jitsiMeeting = null, bool $persist = true): int
+    {
+        $status = (int) ($appointment->status ?? -1);
+        if (!in_array($status, [Constants::orderPlacedPending, Constants::orderAccepted], true)) {
+            return $status;
+        }
+
+        if (!self::isAppointmentPastGracePeriod($appointment->date ?? null, $appointment->time ?? null)) {
+            return $status;
+        }
+
+        if (self::jitsiBothParticipantsJoined($jitsiMeeting)) {
+            return Constants::orderCompleted;
+        }
+
+        if ($persist && $status !== Constants::orderMissed) {
+            $updates = ['status' => Constants::orderMissed];
+            if (empty($appointment->diagnosed_with)) {
+                $updates['diagnosed_with'] = 'NA';
+            }
+
+            // Use query builder so dynamic response fields (e.g. previous_appointments) are not persisted.
+            Appointments::where('id', $appointment->id)->update($updates);
+            $appointment->status = Constants::orderMissed;
+            if (isset($updates['diagnosed_with'])) {
+                $appointment->diagnosed_with = $updates['diagnosed_with'];
+            }
+        }
+
+        return Constants::orderMissed;
+    }
+
+    public static function jitsiBothParticipantsJoined($meeting): bool
+    {
+        if ($meeting === null) {
+            return false;
+        }
+
+        return (int) ($meeting->user_joined ?? 0) === 1
+            && (int) ($meeting->doctor_joined ?? 0) === 1;
+    }
+
+    public static function jitsiEitherParticipantMissing($meeting): bool
+    {
+        if ($meeting === null) {
+            return true;
+        }
+
+        return (int) ($meeting->user_joined ?? 0) !== 1
+            || (int) ($meeting->doctor_joined ?? 0) !== 1;
+    }
      /**
      * Normalize appointment/slot time to 4-digit HHmm (e.g. 1030) for DB compare.
      */
-    public static function normalizeTimeToHi($time)
+       public static function normalizeTimeToHi($time)
     {
         if ($time === null || $time === '') {
             return null;
@@ -859,7 +929,7 @@ class GlobalFunction extends Model
         }
 
         return $booked;
-    }
+        }
 
     public static function isDoctorSlotTimeBooked($slotTime, array $bookedSlotTimes)
     {
@@ -882,7 +952,7 @@ class GlobalFunction extends Model
             $bookedStartMinutes = GlobalFunction::timeHiToMinutes($bookedTime);
             if ($bookedStartMinutes === null) {
                 continue;
-            }
+    }
 
             $bookedEndMinutes = $bookedStartMinutes + $durationMinutes;
             if ($slotMinutes < $bookedEndMinutes && $slotEndMinutes > $bookedStartMinutes) {
@@ -973,8 +1043,8 @@ class GlobalFunction extends Model
         $normalizedHost = strtolower(trim((string) $hostValue));
 
         $hostTimezoneMap = [
-            'indiamulkmed.reapmind.com' => $isTimeZoneValue ? '+05:30' : 'Asia/Kolkata',
-            'uaemulkmed.reapmind.com'    => $isTimeZoneValue ? '+04:00' : 'Asia/Dubai',
+            'india.mulkmed.com' => $isTimeZoneValue ? '+05:30' : 'Asia/Kolkata',
+            'pt.mulkmed.com'    => $isTimeZoneValue ? '+04:00' : 'Asia/Dubai',
         ];
 
         $resolvedTimezone = $hostTimezoneMap[$normalizedHost]
@@ -1195,7 +1265,7 @@ class GlobalFunction extends Model
         return $randomString;
     }
 
-    private static function jitsiWrapperBaseUrl(): string 
+    private static function jitsiWrapperBaseUrl(): string
     {
         $wrapperUrl = rtrim((string) env('JITSI_URL', 'https://vc.mulkmed.com/wrapper.html'), '/');
 
@@ -1281,32 +1351,7 @@ class GlobalFunction extends Model
 
     public static function normalizeJitsiWrapperUrl(?string $wrapperUrl): ?string
     {
-        if ($wrapperUrl === null || $wrapperUrl === '') {
-            return $wrapperUrl;
-        }
-
-        // Production links often use a partially-encoded domain param:
-        // domain=https%3A%2F%2Fuaemulkmed.reapmind.com/v2
-        $wrapperUrl = preg_replace(
-            '#(domain=https%3A%2F%2F[^&]+?)(?:%2Fv2|/v2)(?=&|$)#i',
-            '$1',
-            $wrapperUrl
-        );
-
-        if (preg_match('#domain=([^&]+)#', $wrapperUrl, $matches)) {
-            $decodedDomain = urldecode($matches[1]);
-            $normalizedDomain = self::normalizeJitsiBackendDomain($decodedDomain);
-            if ($normalizedDomain !== $decodedDomain) {
-                $wrapperUrl = preg_replace(
-                    '#domain=[^&]+#',
-                    'domain=' . rawurlencode($normalizedDomain),
-                    $wrapperUrl,
-                    1
-                );
-            }
-        }
-
-        return $wrapperUrl;
+                return $wrapperUrl;
     }
 
     public static function persistNormalizedJitsiMeetingLinks(JitsiMeeting $meeting): JitsiMeeting
@@ -1348,16 +1393,17 @@ class GlobalFunction extends Model
     private static function buildJitsiWrapperUrl(string $roomId, string $jwt): string
     {
         $baseUrl = self::jitsiWrapperBaseUrl();
-        $backendDomain = urlencode(self::jitsiBackendDomain());
+        $backendDomain = urlencode(request()->getSchemeAndHttpHost()).'/v2';
         $hiddenDomain = urlencode((string) env('JITSI_HIDDEN_DOMAIN', 'recorder.vc.mulkmed.com'));
         $moderatorOnly = filter_var(env('JITSI_AUTO_RECORD_MODERATOR_ONLY', true), FILTER_VALIDATE_BOOLEAN)
             ? '1'
             : '0';
-        $recordingEnabled = filter_var(env('JITSI_RECORDING_ENABLED', true), FILTER_VALIDATE_BOOLEAN);
-        $autoRecord = $recordingEnabled ? '&autoRecord=1' : '';
+        $autoRecord = filter_var(env('JITSI_AUTO_RECORD_ON_JOIN', true), FILTER_VALIDATE_BOOLEAN)
+            ? '1'
+            : '0';
 
-        return "{$baseUrl}wrapper.html?roomId={$roomId}&jwt={$jwt}&domain={$backendDomain}&hiddenDomain={$hiddenDomain}{$autoRecord}&autoRecordModeratorOnly={$moderatorOnly}";
-    }
+        return "{$baseUrl}wrapper.html?roomId={$roomId}&jwt={$jwt}&domain={$backendDomain}&hiddenDomain={$hiddenDomain}&autoRecord={$autoRecord}&autoRecordModeratorOnly={$moderatorOnly}";
+        }
 
     private static function jitsiRoomIdPrefix(): string
     {
@@ -1541,25 +1587,7 @@ class GlobalFunction extends Model
         return $query['roomId'] ?? null;
     }
 
-    public static function jitsiBothParticipantsJoined($meeting): bool
-    {
-        if ($meeting === null) {
-            return false;
-        }
 
-        return (int) ($meeting->user_joined ?? 0) === 1
-            && (int) ($meeting->doctor_joined ?? 0) === 1;
-    }
-
-    public static function jitsiEitherParticipantMissing($meeting): bool
-    {
-        if ($meeting === null) {
-            return true;
-        }
-
-        return (int) ($meeting->user_joined ?? 0) !== 1
-            || (int) ($meeting->doctor_joined ?? 0) !== 1;
-    }
 
     /**
      * Silent post-join hook from Flutter (conference_joined=1 on join_jitsi_meeting).
